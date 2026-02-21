@@ -86,6 +86,7 @@ A structured file (JSON or TOML, implementation decision) stored at `.git/uwt.{j
 - Branch parent-child relationships.
 - Worktree paths for each tracked branch.
 - Latest checkout-swap stash hashes for each branch (persists after successful swap until applied or cleared).
+- **Global configuration overrides** (sync/merge strategy, naming convention, branch prefix).
 - Creation timestamps.
 - Branch descriptions (optional).
 - Previous branch tracking (for checkout convenience).
@@ -240,9 +241,9 @@ Mutating commands (`checkout`, `worktree create`, `worktree remove`, `sync`, `me
 
 | Command | Purpose |
 |---------|---------|
-| `uwt list [--json]` | Show all tracked branches with: location (main worktree / linked worktree path / local-only), parent branch, state signals (clean/dirty, ahead/behind parent, ahead/behind remote). `--json` for structured output. |
+| `uwt list [--json]` | Show all tracked branches with: location (main worktree / linked worktree path / local-only), parent branch, state signals (clean/dirty, ahead/behind parent, ahead/behind remote, **stashed changes pending**). `--json` for structured output. |
 | `uwt graph` | ASCII branch dependency tree annotated with worktree locations and state signals. |
-| `uwt status [<branch>]` | Detailed state for a branch: clean/dirty, ahead/behind parent, ahead/behind remote, merge-ready/conflicted. Also reports any in-progress operations (sync/merge), including the absolute path to any temporary worktree used for the operation. |
+| `uwt status [<branch>]` | Detailed state for a branch: clean/dirty, ahead/behind parent, ahead/behind remote, merge-ready/conflicted, **stashed changes pending**. Also reports any in-progress operations (sync/merge), including the absolute path to any temporary worktree used for the operation. |
 | `uwt cd <branch>` | Output the worktree path for shell navigation. If the branch is in a worktree (main or linked), output that path. If the branch has no worktree, error with suggestions (`uwt worktree create <branch>` or `uwt checkout <branch>`). |
 
 ### 7.3 Maintenance
@@ -250,7 +251,7 @@ Mutating commands (`checkout`, `worktree create`, `worktree remove`, `sync`, `me
 | Command | Purpose |
 |---------|---------|
 | `uwt config [key] [value]` | View or set configuration for the current repo (e.g., `base_branch`, `naming_strategy`, `prefix`). Stored in `.git/uwt.{json,toml}`. |
-| `uwt repair` | Reconcile uwt state with actual filesystem and git state. Runs `git worktree repair` and `git worktree prune` to fix git-level issues. Removes stale state entries for deleted worktrees and branches that no longer exist in the git repository. Cleans up orphaned `_uwt/*` branches. Detects and warns about manually created `_uwt` branches that conflict with the namespace. Cleans up stale `uwt:`-prefixed stash entries (scans `git stash list`, drops entries whose hashes are no longer referenced by any active WAL entry **OR** branch metadata in state). Recovers or rolls back incomplete operations using the write-ahead log. |
+| `uwt repair` | Reconcile uwt state with actual filesystem and git state. Runs `git worktree repair` and `git worktree prune` to fix git-level issues. Removes stale state entries for deleted worktrees and branches that no longer exist in the git repository. Cleans up orphaned `_uwt/*` branches. Detects and warns about manually created `_uwt` branches that conflict with the namespace. Cleans up stale `uwt:`-prefixed stash entries (scans `git stash list`, drops entries whose hashes are no longer referenced by any active WAL entry **OR** branch metadata in state, and have been created more than 24 hours ago). Recovers or rolls back incomplete operations using the write-ahead log. |
 
 ### 7.4 Stash Management
 
@@ -313,7 +314,7 @@ Mutating commands (`checkout`, `worktree create`, `worktree remove`, `sync`, `me
 3. Determine the worktree path: `~/.local/share/uwt/<encoded-main-path>/<encoded-branch-name>/`.
 4. If target directory already exists (encoding collision): error with suggestion to use an explicit name.
 5. If branch `feature-auth` doesn't exist, create it from the current branch (or `-b base`).
-6. If branch exists but is not tracked in uwt state: adopt it — record the parent as the `-b` value if specified, otherwise default to the base branch. Warn: "Branch `feature-auth` exists but is not tracked by uwt. Adopting with parent `<parent>`." (Implementation note: also check `git worktree list` in case it's checked out in a manual worktree path that differs from the convention).
+6. If branch exists but is not tracked in uwt state: adopt it — record the parent as the `-b` value if specified, otherwise default to the **current branch**. Warn: "Branch `feature-auth` exists but is not tracked by uwt. Adopting with parent `<parent>`." (Implementation note: also check `git worktree list` in case it's checked out in a manual worktree path that differs from the convention).
 7. Run `git worktree add <absolute-path> feature-auth`.
 8. Record parent-child relationship and worktree path in state.
 9. Release lockfile.
