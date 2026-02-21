@@ -16,12 +16,12 @@ Define a practical, local-first workflow for managing multiple parallel workstre
 
 ## Functional Requirements
 
-1. The system must define one canonical primary workspace path for daily interactive work (IDE-attached).
-2. The system must support creating a child branch from the currently active branch in the primary workspace.
-3. The system must support creating a child branch in a secondary workspace (worktree or clone mode).
+1. The system must define one canonical main worktree path for daily interactive work (IDE-attached).
+2. The system must support creating a child branch from the currently active branch in the main worktree.
+3. The system must support creating a child branch in a secondary worktree.
 4. The system must track explicit parent-child branch relationships as workflow metadata.
 5. The system must provide a command to list active branches, their parent, and their workspace location.
-6. The system must provide a command to switch/promote a chosen branch into the primary workspace.
+6. The system must provide a command to switch/promote a chosen branch into the main worktree.
 7. The system must provide a command to integrate child changes into parent using policy-driven strategies (merge/rebase/cherry-pick).
 8. The system must detect integration conflicts and support resumable workflows after manual conflict resolution.
 9. The system must operate fully locally without requiring push or pull request creation.
@@ -55,13 +55,13 @@ Define a practical, local-first workflow for managing multiple parallel workstre
 
 - Users are comfortable resolving merge/rebase conflicts with standard Git tools.
 - Sub-agents can follow branch lifecycle instructions if the workflow contract is explicit.
-- Most work happens in one primary workspace, with occasional branch-specific secondary workspaces.
+- Most work happens in one main worktree, with occasional branch-specific secondary worktrees.
 
 ## Acceptance Criteria for Planning Phase
 
 This requirements phase is complete when:
 
-1. Team agrees on primary workflow model (single primary workspace + branch-off + integrate-back).
+1. Team agrees on main workflow model (single main worktree + branch-off + integrate-back).
 2. Team agrees that same-branch multi-directory support is non-required for v1.
 3. Functional requirements are approved as sufficient for implementation design.
 4. Open decisions are documented and prioritized.
