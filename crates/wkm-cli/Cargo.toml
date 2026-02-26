@@ -1,0 +1,18 @@
+[package]
+name = "wkm-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "wkm"
+path = "src/main.rs"
+
+[dependencies]
+wkm-core = { workspace = true }
+clap = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+wkm-sandbox = { workspace = true }
+tempfile = { workspace = true }

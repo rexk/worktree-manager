@@ -1,0 +1,22 @@
+[workspace]
+members = ["crates/wkm-core", "crates/wkm-cli", "crates/wkm-sandbox"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[workspace.dependencies]
+wkm-core = { path = "crates/wkm-core" }
+wkm-sandbox = { path = "crates/wkm-sandbox" }
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+thiserror = "2"
+tempfile = "3"
+uuid = { version = "1", features = ["v4"] }
+dirs = "6"
+chrono = { version = "0.4", features = ["serde"] }
+proptest = "1"

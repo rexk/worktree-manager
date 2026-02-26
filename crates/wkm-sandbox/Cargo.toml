@@ -1,0 +1,9 @@
+[package]
+name = "wkm-sandbox"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+tempfile = { workspace = true }
+wkm-core = { workspace = true }
