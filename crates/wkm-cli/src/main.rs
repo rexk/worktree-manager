@@ -30,6 +30,8 @@ enum Commands {
     /// Switch to a branch
     #[command(alias = "co")]
     Checkout(commands::checkout::CheckoutArgs),
+    /// Sync branches by rebasing onto parents
+    Sync(commands::sync::SyncArgs),
 }
 
 fn main() -> anyhow::Result<()> {
@@ -43,5 +45,6 @@ fn main() -> anyhow::Result<()> {
         Commands::Worktree(args) => commands::worktree::run(args),
         Commands::Adopt(args) => commands::adopt::run(args),
         Commands::Checkout(args) => commands::checkout::run(args),
+        Commands::Sync(args) => commands::sync::run(args),
     }
 }
