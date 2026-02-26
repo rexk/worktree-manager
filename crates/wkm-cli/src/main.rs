@@ -32,6 +32,14 @@ enum Commands {
     Checkout(commands::checkout::CheckoutArgs),
     /// Sync branches by rebasing onto parents
     Sync(commands::sync::SyncArgs),
+    /// Merge a child branch into its parent
+    Merge(commands::merge::MergeArgs),
+    /// Manage stashes
+    Stash(commands::stash::StashArgs),
+    /// Repair wkm state
+    Repair(commands::repair::RepairArgs),
+    /// Get or set config values
+    Config(commands::config::ConfigArgs),
 }
 
 fn main() -> anyhow::Result<()> {
@@ -46,5 +54,9 @@ fn main() -> anyhow::Result<()> {
         Commands::Adopt(args) => commands::adopt::run(args),
         Commands::Checkout(args) => commands::checkout::run(args),
         Commands::Sync(args) => commands::sync::run(args),
+        Commands::Merge(args) => commands::merge::run(args),
+        Commands::Stash(args) => commands::stash::run(args),
+        Commands::Repair(args) => commands::repair::run(args),
+        Commands::Config(args) => commands::config::run(args),
     }
 }
