@@ -1,8 +1,11 @@
 pub mod adopt;
 pub mod checkout;
 pub mod init;
+pub mod list;
 pub mod merge;
 pub mod repair;
 pub mod stash;
+pub mod status;
 pub mod sync;
+pub mod visibility;
 pub mod worktree;
