@@ -71,7 +71,8 @@ mod tests {
 
         // Create a linked worktree
         wkm_sandbox::git(repo.path(), &["branch", "linked"]);
-        let wt_path = repo.path().parent().unwrap().join("linked-wt");
+        let wt_dir = tempfile::tempdir().unwrap();
+        let wt_path = wt_dir.path().join("linked-wt");
         wkm_sandbox::git(
             repo.path(),
             &["worktree", "add", wt_path.to_str().unwrap(), "linked"],
@@ -81,5 +82,11 @@ mod tests {
         // Should resolve to the same common dir
         assert_eq!(ctx.git_common_dir, main_common);
         assert_eq!(ctx.state_path, main_common.join("wkm.toml"));
+
+        // Cleanup before tempdir drops
+        wkm_sandbox::git(
+            repo.path(),
+            &["worktree", "remove", wt_path.to_str().unwrap()],
+        );
     }
 }
