@@ -22,6 +22,11 @@ enum Commands {
     Graph(commands::graph::GraphArgs),
     /// Print worktree path for a branch
     Cd(commands::cd::CdArgs),
+    /// Manage worktrees
+    #[command(alias = "wt")]
+    Worktree(commands::worktree::WorktreeArgs),
+    /// Adopt an existing branch
+    Adopt(commands::adopt::AdoptArgs),
 }
 
 fn main() -> anyhow::Result<()> {
@@ -32,5 +37,7 @@ fn main() -> anyhow::Result<()> {
         Commands::Status(args) => commands::status::run(args),
         Commands::Graph(args) => commands::graph::run(args),
         Commands::Cd(args) => commands::cd::run(args),
+        Commands::Worktree(args) => commands::worktree::run(args),
+        Commands::Adopt(args) => commands::adopt::run(args),
     }
 }

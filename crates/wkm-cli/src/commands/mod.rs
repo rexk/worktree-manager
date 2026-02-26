@@ -1,5 +1,7 @@
+pub mod adopt;
 pub mod cd;
 pub mod graph;
 pub mod init;
 pub mod list;
 pub mod status;
+pub mod worktree;
