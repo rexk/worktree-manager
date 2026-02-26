@@ -27,6 +27,9 @@ enum Commands {
     Worktree(commands::worktree::WorktreeArgs),
     /// Adopt an existing branch
     Adopt(commands::adopt::AdoptArgs),
+    /// Switch to a branch
+    #[command(alias = "co")]
+    Checkout(commands::checkout::CheckoutArgs),
 }
 
 fn main() -> anyhow::Result<()> {
@@ -39,5 +42,6 @@ fn main() -> anyhow::Result<()> {
         Commands::Cd(args) => commands::cd::run(args),
         Commands::Worktree(args) => commands::worktree::run(args),
         Commands::Adopt(args) => commands::adopt::run(args),
+        Commands::Checkout(args) => commands::checkout::run(args),
     }
 }

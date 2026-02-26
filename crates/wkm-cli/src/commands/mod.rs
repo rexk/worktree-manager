@@ -1,5 +1,6 @@
 pub mod adopt;
 pub mod cd;
+pub mod checkout;
 pub mod graph;
 pub mod init;
 pub mod list;
