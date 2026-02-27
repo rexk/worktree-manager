@@ -162,7 +162,7 @@ Mutating commands (`checkout`, `worktree create`, `worktree remove`, `sync`, `me
 | FR-6 | Checkout in place must preserve the full working state (staged changes, unstaged changes to tracked files, AND untracked files): captured automatically via `git stash push --include-untracked` and tracked by commit hash in the WAL. Restoration is manual — the tool prints the command (`git stash apply --index <hash>`) for the user to run when ready, preserving the staged/unstaged distinction. Git stash is repository-global — stashes are addressed by commit hash, not by worktree. Stashes remain in the stash list (`git stash list`); `wkm repair` cleans up stale entries (see §8.1). |
 | FR-7 | `wkm checkout <branch>` must error if the branch does not exist. `wkm checkout -b <branch>` creates a new branch (recording current branch as parent) and switches to it. Errors if the branch already exists (same as `git checkout -b`). |
 | FR-8 | `wkm checkout <branch>` where `<branch>` is the current branch is a no-op. |
-| FR-9 | If `wkm worktree create <branch>` targets a branch already checked out in another worktree, error with actionable suggestions: "`wkm checkout <branch>` to move the branch to the current directory" or "`wkm cd <branch>` to navigate to the existing worktree." |
+| FR-9 | If `wkm worktree create <branch>` targets a branch already checked out in another worktree, error with actionable suggestions: "`wkm checkout <branch>` to move the branch to the current directory" or "`wkm wp <branch>` to navigate to the existing worktree." |
 
 ### 6.2 Branch Relationships
 
@@ -233,7 +233,7 @@ Mutating commands (`checkout`, `worktree create`, `worktree remove`, `sync`, `me
 | `wkm checkout -b <branch>` | Create a new branch from the current branch, record parent relationship, and switch to it in the current directory. Errors if branch already exists. Works from any worktree — parent is the branch currently checked out in that worktree. |
 | `wkm adopt <branch> [-p parent]` | Adopt an existing git branch into wkm tracking. Records the parent-child relationship in state. Automatically detects if the branch is already checked out in a worktree (via `git worktree list`) and records the path. Does not create a new worktree. If `-p` is not provided, defaults to the current branch. |
 | `wkm worktree create [<branch>] [-b base]` | Create a worktree at the conventional location. If `<branch>` is omitted, auto-generate a name using the configured strategy. Creates the branch from `base` (default: current branch) if it doesn't exist. `-b` sets both the creation point and the parent relationship. Records state. Prints the worktree path. Errors if branch is already checked out elsewhere. |
-| `wkm worktree remove [<branch>]` | Remove the worktree for the given branch. Branch itself is kept (with parent relationship intact). Cleans up associated `_wkm/*` temp branches. Errors if run from inside the worktree being removed (user must navigate out first, e.g., `cd $(wkm cd main)`). If no branch specified, removes the worktree for the current directory's branch. |
+| `wkm worktree remove [<branch>]` | Remove the worktree for the given branch. Branch itself is kept (with parent relationship intact). Cleans up associated `_wkm/*` temp branches. Errors if run from inside the worktree being removed (user must navigate out first, e.g., `cd $(wkm wp main)`). If no branch specified, removes the worktree for the current directory's branch. |
 | `wkm sync [--continue / --abort]` | Fetch remote, fast-forward base branch if possible, and restack the branch graph: cascade rebase of all child branches onto their updated parents. Does NOT integrate. Requires all affected worktrees to be clean. `--continue` resumes after conflict resolution (and resumes parent operation if linked). `--abort` restores pre-sync state (and clears parent merge --all if linked). |
 | `wkm merge <branch> [--all / --yes / --abort]` | Integrate child branch into current branch (fast-forward by default). Confirmation prompt before mutations. Re-parents descendants, runs internal sync on them, cleans up merged branch/worktree/temp branches. `--all` merges all direct children sequentially (resumes automatically after descendant sync conflicts). `--yes` skips prompts. `--abort` restores pre-merge state (only before descendant sync begins). |
 
@@ -244,7 +244,7 @@ Mutating commands (`checkout`, `worktree create`, `worktree remove`, `sync`, `me
 | `wkm list [--json]` | Show all tracked branches with: location (main worktree / linked worktree path / local-only), parent branch, state signals (clean/dirty, ahead/behind parent, ahead/behind remote, **stashed changes pending**). `--json` for structured output. |
 | `wkm graph` | ASCII branch dependency tree annotated with worktree locations and state signals. |
 | `wkm status [<branch>]` | Detailed state for a branch: clean/dirty, ahead/behind parent, ahead/behind remote, merge-ready/conflicted, **stashed changes pending**. Also reports any in-progress operations (sync/merge), including the absolute path to any temporary worktree used for the operation. |
-| `wkm cd <branch>` | Output the worktree path for shell navigation. If the branch is in a worktree (main or linked), output that path. If the branch has no worktree, error with suggestions (`wkm worktree create <branch>` or `wkm checkout <branch>`). |
+| `wkm wp <branch>` | Output the worktree path for shell navigation (alias for `worktree-path`). If the branch is in a worktree (main or linked), output that path. If the branch has no worktree, error with suggestions (`wkm worktree create <branch>` or `wkm checkout <branch>`). |
 
 ### 7.3 Maintenance
 
@@ -472,7 +472,7 @@ Error: a sync operation is in progress (conflict in feature-auth).
 ```
 
 - `wkm status` reports in-progress operations prominently, including parent operation context (e.g., "sync in progress, triggered by merge --all — 2 of 4 children merged").
-- Read-only commands (`list`, `graph`, `cd`) are never blocked.
+- Read-only commands (`list`, `graph`, `worktree-path`) are never blocked.
 
 ## 9. Non-Functional Requirements
 
@@ -508,7 +508,7 @@ These are documented for awareness, not blockers:
 | State file format | JSON vs TOML | Functionally equivalent at this scale |
 | State storage architecture | Single file vs distributed files | Single file is simpler; distributed (per-branch, per-operation) may scale better |
 | Path/branch encoding algorithm | Must be deterministic and best-effort collision-resistant | Both main worktree paths and branch names use the same encoding |
-| Shell integration for `wkm cd` | Shell function wrapper vs subshell | `cd $(wkm cd branch)` works but a shell function could be smoother |
+| Shell integration for `wkm wp` | Shell function wrapper vs subshell | `cd $(wkm wp branch)` works but a shell function could be smoother |
 | Default naming strategy | `timestamp` (default) vs `random` | Timestamp is sortable; random is more memorable |
 | Operation ID generation | UUID, counter, timestamp-based | Must be unique within the state file lifetime |
 | `wkm stash` subcommand | Core v1 | Branch-aware stash management (maps stash hashes to branches via state metadata). |

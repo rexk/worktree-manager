@@ -36,7 +36,7 @@ fn detect_shell() -> anyhow::Result<String> {
 
 const BASH_ZSH_WRAPPER: &str = r#"export WKM_SHELL_SETUP=1
 wkm() {
-  if [ "$1" = "cd" ] && [ $# -ge 2 ]; then
+  if [ "$1" = "wp" ] && [ $# -ge 2 ]; then
     local dir
     dir="$(command wkm worktree-path "${@:2}")" && cd "$dir"
   else
@@ -47,7 +47,7 @@ wkm() {
 
 const FISH_WRAPPER: &str = r#"set -gx WKM_SHELL_SETUP 1
 function wkm
-  if test (count $argv) -ge 2; and test "$argv[1]" = "cd"
+  if test (count $argv) -ge 2; and test "$argv[1]" = "wp"
     set -l dir (command wkm worktree-path $argv[2..])
     and cd $dir
   else

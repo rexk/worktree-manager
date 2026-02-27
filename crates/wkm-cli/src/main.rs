@@ -22,9 +22,9 @@ enum Commands {
     /// Show branch graph
     Graph(commands::graph::GraphArgs),
     /// Print worktree path for a branch
-    #[command(alias = "cd")]
+    #[command(alias = "wp")]
     WorktreePath(commands::cd::CdArgs),
-    /// Output shell wrapper for wkm cd integration
+    /// Output shell wrapper for wkm wp integration
     ShellSetup(commands::shell_setup::ShellSetupArgs),
     /// Manage worktrees
     #[command(alias = "wt")]
@@ -59,8 +59,8 @@ fn main() -> anyhow::Result<()> {
         Commands::Status(args) => commands::status::run(args),
         Commands::Graph(args) => commands::graph::run(args),
         Commands::WorktreePath(args) => {
-            let invoked_as_cd = std::env::args().nth(1).is_some_and(|s| s == "cd");
-            commands::cd::run(args, invoked_as_cd)
+            let invoked_as_wp = std::env::args().nth(1).is_some_and(|s| s == "wp");
+            commands::cd::run(args, invoked_as_wp)
         }
         Commands::ShellSetup(args) => commands::shell_setup::run(args),
         Commands::Worktree(args) => commands::worktree::run(args),

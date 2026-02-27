@@ -52,7 +52,7 @@ pub fn list(
     Ok(entries)
 }
 
-/// Get the worktree path for a branch (for `wkm cd`).
+/// Get the worktree path for a branch (for `wkm wp`).
 pub fn cd_path(ctx: &RepoContext, branch: &str) -> Result<PathBuf, WkmError> {
     let wkm_state = state::read_state(&ctx.state_path)?.ok_or(WkmError::NotInitialized)?;
 

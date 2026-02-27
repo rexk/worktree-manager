@@ -41,7 +41,7 @@ pub enum WkmError {
     #[error("directory collision for '{0}'. Use `wkm worktree create --name <name>` instead")]
     DirectoryCollision(String),
 
-    #[error("cannot remove worktree from inside it. Run from a different worktree or use `cd`")]
+    #[error("cannot remove worktree from inside it. Run from a different worktree or use `wkm wp`")]
     RemoveFromInside,
 
     #[error("no worktree for branch '{0}'. Use `wkm worktree create` or `wkm checkout`")]
