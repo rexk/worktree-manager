@@ -1,6 +1,7 @@
 pub mod adopt;
 pub mod cd;
 pub mod checkout;
+pub mod shell_setup;
 pub mod config;
 pub mod graph;
 pub mod init;
