@@ -1,5 +1,3 @@
-use std::path::Path;
-
 use crate::error::WkmError;
 use crate::git::{GitBranches, GitDiscovery, GitMutations, GitStash, GitStatus, GitWorktrees};
 use crate::repo::RepoContext;

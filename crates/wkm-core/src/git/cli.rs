@@ -54,6 +54,7 @@ impl CliGit {
     }
 
     /// Run git -C <dir> with args.
+    #[allow(dead_code)]
     fn git_c(&self, dir: &Path, args: &[&str]) -> Result<String> {
         let dir_str = dir
             .to_str()

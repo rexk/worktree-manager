@@ -1,7 +1,45 @@
+use serde::Serialize;
+
 use crate::error::WkmError;
 use crate::graph;
 use crate::repo::RepoContext;
 use crate::state;
+
+/// A node in the graph data output.
+#[derive(Debug, Clone, Serialize)]
+pub struct GraphNode {
+    pub name: String,
+    pub parent: Option<String>,
+    pub children: Vec<String>,
+}
+
+/// Get the branch graph as structured data (for --json).
+pub fn graph_data(ctx: &RepoContext) -> Result<Vec<GraphNode>, WkmError> {
+    let wkm_state = state::read_state(&ctx.state_path)?.ok_or(WkmError::NotInitialized)?;
+    let root = &wkm_state.config.base_branch;
+
+    let children_map = graph::children_of_all(&wkm_state.branches);
+
+    let mut nodes = Vec::new();
+
+    // Root node
+    nodes.push(GraphNode {
+        name: root.clone(),
+        parent: None,
+        children: children_map.get(root).cloned().unwrap_or_default(),
+    });
+
+    // All tracked branches
+    for (name, entry) in &wkm_state.branches {
+        nodes.push(GraphNode {
+            name: name.clone(),
+            parent: entry.parent.clone(),
+            children: children_map.get(name).cloned().unwrap_or_default(),
+        });
+    }
+
+    Ok(nodes)
+}
 
 /// Render the branch graph as an ASCII tree.
 pub fn render_graph(

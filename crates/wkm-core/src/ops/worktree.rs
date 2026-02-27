@@ -50,10 +50,25 @@ pub fn create(
         .unwrap_or_else(|| wkm_state.config.base_branch.clone());
 
     // Determine directory name
-    let dir_name = opts
-        .name
-        .clone()
-        .unwrap_or_else(|| encoding::encode_branch_name(&opts.branch));
+    let dir_name = if let Some(ref name) = opts.name {
+        name.clone()
+    } else {
+        let mut generated = encoding::encode_branch_name(&opts.branch);
+
+        // Apply prefix if configured
+        if let Some(ref prefix) = wkm_state.config.prefix {
+            generated = format!("{prefix}-{generated}");
+        }
+
+        // Apply max length if configured
+        if let Some(max_len) = wkm_state.config.max_branch_length {
+            if generated.len() > max_len {
+                generated.truncate(max_len);
+            }
+        }
+
+        generated
+    };
 
     let worktree_path = ctx.storage_dir.join(&dir_name);
 

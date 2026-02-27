@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::error::WkmError;
 use crate::git::types::RebaseResult;
@@ -434,7 +434,7 @@ fn update_sync_wal(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::git::GitDiscovery;
+
     use crate::git::cli::CliGit;
     use crate::ops::init::{self, InitOptions};
     use crate::ops::worktree::{self, CreateOptions};

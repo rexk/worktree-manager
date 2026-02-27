@@ -11,6 +11,7 @@ path = "src/main.rs"
 [dependencies]
 wkm-core = { workspace = true }
 clap = { workspace = true }
+clap_complete = { workspace = true }
 serde_json = { workspace = true }
 anyhow = "1"
 

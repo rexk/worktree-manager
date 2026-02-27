@@ -1,6 +1,7 @@
 mod commands;
 
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
+use clap_complete::Shell;
 
 #[derive(Parser)]
 #[command(name = "wkm", about = "Git worktree manager")]
@@ -40,6 +41,11 @@ enum Commands {
     Repair(commands::repair::RepairArgs),
     /// Get or set config values
     Config(commands::config::ConfigArgs),
+    /// Generate shell completions
+    Completions {
+        /// Shell to generate completions for
+        shell: Shell,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
@@ -58,5 +64,9 @@ fn main() -> anyhow::Result<()> {
         Commands::Stash(args) => commands::stash::run(args),
         Commands::Repair(args) => commands::repair::run(args),
         Commands::Config(args) => commands::config::run(args),
+        Commands::Completions { shell } => {
+            clap_complete::generate(*shell, &mut Cli::command(), "wkm", &mut std::io::stdout());
+            Ok(())
+        }
     }
 }

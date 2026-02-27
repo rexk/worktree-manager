@@ -64,6 +64,17 @@ pub fn topo_sort(root: &str, branches: &BTreeMap<String, BranchEntry>) -> Vec<St
     result
 }
 
+/// Build a map of parent -> children names for all branches.
+pub fn children_of_all(branches: &BTreeMap<String, BranchEntry>) -> BTreeMap<String, Vec<String>> {
+    let mut map: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for (name, entry) in branches {
+        if let Some(ref parent) = entry.parent {
+            map.entry(parent.clone()).or_default().push(name.clone());
+        }
+    }
+    map
+}
+
 /// Build an ASCII tree representation.
 pub fn ascii_tree(
     root: &str,
