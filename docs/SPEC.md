@@ -53,8 +53,10 @@ Managing multiple simultaneous workstreams across AI agents and interactive deve
     .git/wkm.lock                               # Lockfile (when operations in progress)
 
 ~/.local/share/wkm/<encoded-main-worktree-path>/
-    <encoded-branch-name>/                      # Linked worktree
-    <encoded-branch-name>/                      # Linked worktree
+    <encoded-branch-name>/
+        <repo-name>/                            # Linked worktree
+    <encoded-branch-name>/
+        <repo-name>/                            # Linked worktree
 ```
 
 ### 5.2 Directory Convention
@@ -62,8 +64,10 @@ Managing multiple simultaneous workstreams across AI agents and interactive deve
 Worktree storage path is derived from the main worktree's local filesystem path and branch name, both encoded to produce unique directory names:
 
 ```
-~/.local/share/wkm/<encoded-main-worktree-path>/<encoded-branch-name>/
+~/.local/share/wkm/<encoded-main-worktree-path>/<encoded-branch-name>/<repo-name>/
 ```
+
+The `<repo-name>` is the last component of the main worktree path (e.g., `/home/user/data-pipelines` → `data-pipelines`). This makes the terminal prompt show the repository name instead of the encoded branch name, since terminal tools (starship, oh-my-zsh) already display the git branch.
 
 **Encoding requirements:**
 - The encoding must be deterministic (same input → same encoded directory).

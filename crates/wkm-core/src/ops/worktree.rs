@@ -70,7 +70,7 @@ pub fn create(
         generated
     };
 
-    let worktree_path = ctx.storage_dir.join(&dir_name);
+    let worktree_path = ctx.storage_dir.join(&dir_name).join(&ctx.repo_name);
 
     // Check for directory collision
     if worktree_path.exists() {

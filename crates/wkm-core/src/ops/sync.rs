@@ -134,7 +134,10 @@ pub fn sync(
         } else {
             // Create temp worktree for rebase
             let temp_branch = format!("_wkm/rebase/{branch}");
-            let temp_path = ctx.storage_dir.join(format!("_rebase_{branch}"));
+            let temp_path = ctx
+                .storage_dir
+                .join(format!("_rebase_{branch}"))
+                .join(&ctx.repo_name);
 
             if !git.branch_exists(&temp_branch)? {
                 let branch_ref = git.branch_ref(branch)?;

@@ -17,6 +17,8 @@ pub struct RepoContext {
     pub lock_path: PathBuf,
     /// Path to the storage directory (`~/.local/share/wkm/<encoded>/`).
     pub storage_dir: PathBuf,
+    /// Repository name (last component of main worktree path).
+    pub repo_name: String,
 }
 
 impl RepoContext {
@@ -33,12 +35,18 @@ impl RepoContext {
         let encoded_path = encoding::encode_path(main_worktree.to_string_lossy().as_ref());
         let storage_dir = data_dir.join("wkm").join(encoded_path);
 
+        let repo_name = main_worktree
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "repo".to_string());
+
         Ok(Self {
             git_common_dir,
             main_worktree,
             state_path,
             lock_path,
             storage_dir,
+            repo_name,
         })
     }
 

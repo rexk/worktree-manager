@@ -44,7 +44,7 @@ cargo run -p wkm-cli -- <command>    # Run the CLI
 - **WAL**: write-ahead log entries allow crash recovery of multi-step operations.
 - **Swap operation** in checkout: moves a checked-out branch between worktrees.
 - **Cascade rebase** in sync: topologically sorts descendants and rebases each onto its updated parent.
-- **Storage directory**: `~/.local/share/wkm/<encoded-repo-path>/` for per-repo data outside the git dir.
+- **Storage directory**: `~/.local/share/wkm/<encoded-repo-path>/<encoded-branch>/<repo-name>/` for worktrees, where `<repo-name>` is the last component of the main worktree path (so the terminal prompt shows the repo name).
 
 ### Testing
 
