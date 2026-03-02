@@ -1,13 +1,13 @@
 pub mod adopt;
 pub mod cd;
 pub mod checkout;
-pub mod shell_setup;
 pub mod config;
 pub mod graph;
 pub mod init;
 pub mod list;
 pub mod merge;
 pub mod repair;
+pub mod shell_setup;
 pub mod stash;
 pub mod status;
 pub mod sync;
