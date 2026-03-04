@@ -37,6 +37,8 @@ pub struct WkmConfig {
     pub prefix: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_branch_length: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub storage_dir: Option<PathBuf>,
 }
 
 impl WkmConfig {
@@ -47,6 +49,7 @@ impl WkmConfig {
             naming_strategy: NamingStrategy::default(),
             prefix: None,
             max_branch_length: None,
+            storage_dir: None,
         }
     }
 }

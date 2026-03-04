@@ -18,6 +18,5 @@ toml = "0.8"
 thiserror = "2"
 tempfile = "3"
 uuid = { version = "1", features = ["v4"] }
-dirs = "6"
 chrono = { version = "0.4", features = ["serde"] }
 proptest = "1"

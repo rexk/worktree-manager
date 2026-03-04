@@ -64,8 +64,17 @@ Managing multiple simultaneous workstreams across AI agents and interactive deve
 Worktree storage path is derived from the main worktree's local filesystem path and branch name, both encoded to produce unique directory names:
 
 ```
-~/.local/share/wkm/<encoded-main-worktree-path>/<encoded-branch-name>/<repo-name>/
+<base-dir>/<encoded-main-worktree-path>/<encoded-branch-name>/<repo-name>/
 ```
+
+The `<base-dir>` is resolved using tiered priority:
+
+1. **Per-repo config** (`wkm.toml` → `config.storage_dir`) — absolute path used as the base directory.
+2. **`WKM_DATA_DIR` env var** — if set, used as the base directory.
+3. **`XDG_DATA_HOME` env var** — if set, `$XDG_DATA_HOME/wkm/` is used.
+4. **Fallback: `~/.local/share/wkm/`** — always, on all platforms.
+
+The fallback deliberately avoids platform-specific directories (e.g., macOS `~/Library/Application Support/`) because spaces in paths break tools like nix, devenv, and direnv.
 
 The `<repo-name>` is the last component of the main worktree path (e.g., `/home/user/data-pipelines` → `data-pipelines`). This makes the terminal prompt show the repository name instead of the encoded branch name, since terminal tools (starship, oh-my-zsh) already display the git branch.
 

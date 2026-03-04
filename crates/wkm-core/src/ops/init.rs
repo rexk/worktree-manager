@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use crate::error::WkmError;
 use crate::repo::RepoContext;
 use crate::state;
@@ -6,12 +8,14 @@ use crate::state::types::{WkmConfig, WkmState};
 /// Options for initializing wkm.
 pub struct InitOptions {
     pub base_branch: String,
+    pub storage_dir: Option<PathBuf>,
 }
 
 impl Default for InitOptions {
     fn default() -> Self {
         Self {
             base_branch: "main".to_string(),
+            storage_dir: None,
         }
     }
 }
@@ -30,7 +34,8 @@ pub fn init(ctx: &RepoContext, opts: &InitOptions) -> Result<WkmState, WkmError>
         return Err(WkmError::AlreadyInitialized);
     }
 
-    let config = WkmConfig::new(&opts.base_branch);
+    let mut config = WkmConfig::new(&opts.base_branch);
+    config.storage_dir = opts.storage_dir.clone();
     let new_state = WkmState::new(config);
 
     // Create storage directory
@@ -87,6 +92,7 @@ mod tests {
         let ctx = RepoContext::from_path(repo.path()).unwrap();
         let opts = InitOptions {
             base_branch: "develop".to_string(),
+            storage_dir: None,
         };
         let state = init(&ctx, &opts).unwrap();
         assert_eq!(state.config.base_branch, "develop");

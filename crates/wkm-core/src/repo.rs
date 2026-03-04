@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use crate::encoding;
 use crate::error::WkmError;
 use crate::git::GitDiscovery;
+use crate::state;
 
 /// Resolved paths for a wkm-managed repository.
 #[derive(Debug, Clone)]
@@ -15,10 +16,35 @@ pub struct RepoContext {
     pub state_path: PathBuf,
     /// Path to the lockfile (`.git/wkm.lock`).
     pub lock_path: PathBuf,
-    /// Path to the storage directory (`~/.local/share/wkm/<encoded>/`).
+    /// Path to the storage directory.
     pub storage_dir: PathBuf,
     /// Repository name (last component of main worktree path).
     pub repo_name: String,
+}
+
+/// Resolve the base data directory for wkm storage using tiered resolution:
+/// 1. Per-repo config `storage_dir` (returned directly, not under `wkm/`)
+/// 2. `WKM_DATA_DIR` env var (returned directly, not under `wkm/`)
+/// 3. `XDG_DATA_HOME` env var → `$XDG_DATA_HOME/wkm/`
+/// 4. Fallback: `~/.local/share/wkm/`
+fn resolve_base_data_dir(config_storage_dir: Option<&Path>) -> Result<PathBuf, WkmError> {
+    if let Some(dir) = config_storage_dir {
+        return Ok(dir.to_path_buf());
+    }
+
+    if let Ok(dir) = std::env::var("WKM_DATA_DIR") {
+        return Ok(PathBuf::from(dir));
+    }
+
+    if let Ok(dir) = std::env::var("XDG_DATA_HOME") {
+        return Ok(PathBuf::from(dir).join("wkm"));
+    }
+
+    let home = std::env::var("HOME").map(PathBuf::from).map_err(|_| {
+        WkmError::Other("could not determine home directory: HOME not set".to_string())
+    })?;
+
+    Ok(home.join(".local/share/wkm"))
 }
 
 impl RepoContext {
@@ -29,11 +55,12 @@ impl RepoContext {
         let state_path = git_common_dir.join("wkm.toml");
         let lock_path = git_common_dir.join("wkm.lock");
 
-        let data_dir = dirs::data_dir()
-            .ok_or_else(|| WkmError::Other("could not determine data directory".to_string()))?;
+        // Load existing state to check for per-repo config storage_dir
+        let config_storage_dir = state::read_state(&state_path)?.and_then(|s| s.config.storage_dir);
 
+        let base_dir = resolve_base_data_dir(config_storage_dir.as_deref())?;
         let encoded_path = encoding::encode_path(main_worktree.to_string_lossy().as_ref());
-        let storage_dir = data_dir.join("wkm").join(encoded_path);
+        let storage_dir = base_dir.join(encoded_path);
 
         let repo_name = main_worktree
             .file_name()

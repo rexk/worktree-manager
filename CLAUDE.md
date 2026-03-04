@@ -44,7 +44,7 @@ cargo run -p wkm-cli -- <command>    # Run the CLI
 - **WAL**: write-ahead log entries allow crash recovery of multi-step operations.
 - **Swap operation** in checkout: moves a checked-out branch between worktrees.
 - **Cascade rebase** in sync: topologically sorts descendants and rebases each onto its updated parent.
-- **Storage directory**: `~/.local/share/wkm/<encoded-repo-path>/<encoded-branch>/<repo-name>/` for worktrees, where `<repo-name>` is the last component of the main worktree path (so the terminal prompt shows the repo name).
+- **Storage directory**: `<base-dir>/<encoded-repo-path>/<encoded-branch>/<repo-name>/` for worktrees. Base dir resolved by: per-repo `config.storage_dir` → `WKM_DATA_DIR` env → `XDG_DATA_HOME/wkm/` → `~/.local/share/wkm/`. `<repo-name>` is the last component of the main worktree path (so the terminal prompt shows the repo name).
 
 ### Testing
 
