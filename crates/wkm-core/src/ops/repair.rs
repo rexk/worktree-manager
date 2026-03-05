@@ -12,6 +12,7 @@ pub struct RepairResult {
     pub branches_removed: Vec<String>,
     pub worktree_paths_cleared: Vec<String>,
     pub orphan_branches_deleted: Vec<String>,
+    pub pending_removals_cleaned: Vec<String>,
 }
 
 /// Run repair: enforce all invariants.
@@ -102,6 +103,22 @@ pub fn repair(
         if !orphan_candidates.contains(&branch) {
             let _ = git.delete_branch(&branch, true);
             result.orphan_branches_deleted.push(branch);
+        }
+    }
+
+    // 6. Clean up leftover .wkm-removing directories in storage_dir
+    if ctx.storage_dir.exists() {
+        if let Ok(entries) = std::fs::read_dir(&ctx.storage_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() && path.extension().map_or(false, |ext| ext == "wkm-removing") {
+                    if std::fs::remove_dir_all(&path).is_ok() {
+                        result
+                            .pending_removals_cleaned
+                            .push(path.display().to_string());
+                    }
+                }
+            }
         }
     }
 
@@ -265,6 +282,22 @@ mod tests {
                 .orphan_branches_deleted
                 .contains(&"_wkm/hold/feat".to_string())
         );
+    }
+
+    #[test]
+    fn repair_cleans_wkm_removing_dirs() {
+        let (_repo, ctx, git) = setup();
+
+        // Create a fake .wkm-removing directory in the storage dir
+        std::fs::create_dir_all(&ctx.storage_dir).unwrap();
+        let leftover = ctx.storage_dir.join("some-branch.wkm-removing");
+        std::fs::create_dir_all(&leftover).unwrap();
+        std::fs::write(leftover.join("big-file"), "data").unwrap();
+        assert!(leftover.exists());
+
+        let result = repair(&ctx, &git).unwrap();
+        assert!(!leftover.exists());
+        assert_eq!(result.pending_removals_cleaned.len(), 1);
     }
 
     #[test]

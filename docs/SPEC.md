@@ -343,11 +343,15 @@ Mutating commands (`checkout`, `worktree create`, `worktree remove`, `sync`, `me
 1. If no branch specified: use current directory's branch.
 2. If currently inside the worktree being removed: error with message — "Cannot remove the current worktree. Navigate out first: `cd $(wkm cd <main-branch>)`".
 3. Acquire lockfile. Re-validate preconditions.
-4. Run `git worktree remove <path>`.
-5. Clean up associated `_wkm/*` temp branches.
-6. Update state: mark branch as having no worktree (keep parent-child relationship).
-7. Release lockfile.
-8. Print confirmation.
+4. Update state: mark branch as having no worktree (keep parent-child relationship).
+5. Rename `<worktree_path>` → `<worktree_path>.wkm-removing` (instant on same filesystem). If rename fails (e.g. cross-filesystem), fall back to synchronous `git worktree remove --force`.
+6. Run `git worktree prune` to clean git's worktree admin entries for the now-missing path.
+7. Clean up associated `_wkm/*` temp branches.
+8. Release lockfile.
+9. Spawn a detached `rm -rf <worktree_path>.wkm-removing` process in the background. Return immediately.
+10. Print confirmation.
+
+**Background deletion recovery:** If the background `rm -rf` is interrupted, the `.wkm-removing` directory persists harmlessly. `wkm repair` scans the storage directory for `*.wkm-removing` directories and deletes them.
 
 ### 8.3 Sync
 

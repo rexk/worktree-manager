@@ -177,8 +177,23 @@ pub fn remove(
         }
     }
 
-    // Remove the worktree
-    git.worktree_remove(&worktree_path, force)?;
+    // Update state first — clear worktree_path before touching the filesystem
+    if let Some(entry) = wkm_state.branches.get_mut(&branch_name) {
+        entry.worktree_path = None;
+    }
+    state::write_state(&ctx.state_path, &wkm_state)?;
+
+    // Try to rename the worktree directory for background deletion.
+    // The ".wkm-removing" suffix signals that this directory is pending cleanup.
+    let removing_path = worktree_path.with_extension("wkm-removing");
+    let renamed = if worktree_path.exists() {
+        std::fs::rename(&worktree_path, &removing_path).is_ok()
+    } else {
+        false
+    };
+
+    // Prune git worktree metadata (the original path no longer exists after rename)
+    let _ = git.worktree_prune();
 
     // Clean up any _wkm/ hold branches for this branch
     let hold_branch = format!("_wkm/hold/{branch_name}");
@@ -186,15 +201,32 @@ pub fn remove(
         let _ = git.delete_branch(&hold_branch, true);
     }
 
-    // Update state — keep branch entry but clear worktree_path
-    if let Some(entry) = wkm_state.branches.get_mut(&branch_name) {
-        entry.worktree_path = None;
+    // Delete the directory: background if we renamed, synchronous fallback otherwise
+    if renamed {
+        spawn_background_delete(&removing_path);
+    } else if worktree_path.exists() {
+        // Fallback: rename failed (cross-filesystem), use synchronous removal
+        git.worktree_remove(&worktree_path, force)?;
     }
-    state::write_state(&ctx.state_path, &wkm_state)?;
 
     drop(lock);
 
     Ok(branch_name)
+}
+
+/// Spawn a detached `rm -rf` process to delete a directory in the background.
+fn spawn_background_delete(path: &std::path::Path) {
+    let path_str = match path.to_str() {
+        Some(s) => s.to_string(),
+        None => return, // non-UTF8 path, skip background delete
+    };
+
+    let _ = std::process::Command::new("rm")
+        .args(["-rf", &path_str])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
 }
 
 #[cfg(test)]
@@ -345,7 +377,7 @@ mod tests {
         let removed = remove(&ctx, &git, Some("feature"), false).unwrap();
         assert_eq!(removed, "feature");
 
-        // Worktree path should be gone
+        // Original worktree path should be gone (renamed to .wkm-removing)
         assert!(!wt_path.exists());
 
         // Branch should still be in state but without worktree_path
@@ -355,6 +387,48 @@ mod tests {
 
         // Git branch should still exist
         assert!(git.branch_exists("feature").unwrap());
+
+        // Git should no longer track the worktree
+        let worktrees = git.worktree_list().unwrap();
+        assert!(!worktrees.iter().any(|w| w.path == wt_path));
+    }
+
+    #[test]
+    fn worktree_remove_renames_to_wkm_removing() {
+        let (_repo, ctx, git) = setup();
+
+        create(
+            &ctx,
+            &git,
+            &CreateOptions {
+                branch: "feature".to_string(),
+                name: None,
+                base: None,
+                description: None,
+            },
+        )
+        .unwrap();
+
+        let wkm_state = state::read_state(&ctx.state_path).unwrap().unwrap();
+        let wt_path = wkm_state.branches["feature"]
+            .worktree_path
+            .as_ref()
+            .unwrap()
+            .clone();
+        let removing_path = wt_path.with_extension("wkm-removing");
+
+        remove(&ctx, &git, Some("feature"), false).unwrap();
+
+        // Original path gone
+        assert!(!wt_path.exists());
+
+        // .wkm-removing may still exist briefly (background rm -rf)
+        // but the state should already be updated
+        let wkm_state = state::read_state(&ctx.state_path).unwrap().unwrap();
+        assert!(wkm_state.branches["feature"].worktree_path.is_none());
+
+        // Clean up for test
+        let _ = std::fs::remove_dir_all(&removing_path);
     }
 
     #[test]
