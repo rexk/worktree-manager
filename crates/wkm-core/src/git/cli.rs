@@ -164,6 +164,15 @@ impl GitBranches for CliGit {
         Ok((ahead, behind))
     }
 
+    fn branch_list(&self) -> Result<Vec<String>> {
+        let output = self.run_ok(&["branch", "--format=%(refname:short)"])?;
+        Ok(output
+            .lines()
+            .filter(|l| !l.is_empty())
+            .map(|l| l.to_string())
+            .collect())
+    }
+
     fn remote_tracking_branch(&self, branch: &str) -> Result<Option<String>> {
         let output = self.run(&[
             "rev-parse",
@@ -628,6 +637,16 @@ mod tests {
         let (ahead, behind) = git.ahead_behind("feature", "main").unwrap();
         assert_eq!(ahead, 2);
         assert_eq!(behind, 0);
+    }
+
+    #[test]
+    fn branches_list() {
+        let (dir, git) = test_repo();
+        run_git(dir.path(), &["branch", "alpha", "main"]);
+        run_git(dir.path(), &["branch", "beta", "main"]);
+        let mut branches = git.branch_list().unwrap();
+        branches.sort();
+        assert_eq!(branches, vec!["alpha", "beta", "main"]);
     }
 
     #[test]

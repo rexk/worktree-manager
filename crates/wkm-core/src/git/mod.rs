@@ -26,6 +26,7 @@ pub trait GitBranches {
     fn is_ancestor(&self, ancestor: &str, descendant: &str) -> Result<bool>;
     fn ahead_behind(&self, a: &str, b: &str) -> Result<(usize, usize)>;
     fn remote_tracking_branch(&self, branch: &str) -> Result<Option<String>>;
+    fn branch_list(&self) -> Result<Vec<String>>;
 }
 
 /// Worktree operations.

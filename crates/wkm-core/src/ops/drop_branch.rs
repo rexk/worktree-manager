@@ -96,7 +96,7 @@ mod tests {
     fn drop_removes_entry_keeps_git_branch() {
         let (repo, ctx, git) = setup();
         repo.create_branch("feature");
-        adopt::adopt(&ctx, &git, "feature", None).unwrap();
+        adopt::adopt(&ctx, &git, &["feature".to_string()], None, false).unwrap();
 
         drop(&ctx, &git, "feature", false).unwrap();
 
@@ -109,7 +109,7 @@ mod tests {
     fn drop_delete_removes_git_branch() {
         let (repo, ctx, git) = setup();
         repo.create_branch("feature");
-        adopt::adopt(&ctx, &git, "feature", None).unwrap();
+        adopt::adopt(&ctx, &git, &["feature".to_string()], None, false).unwrap();
 
         drop(&ctx, &git, "feature", true).unwrap();
 
@@ -122,9 +122,16 @@ mod tests {
     fn drop_reparents_children() {
         let (repo, ctx, git) = setup();
         repo.create_branch("parent-feat");
-        adopt::adopt(&ctx, &git, "parent-feat", None).unwrap();
+        adopt::adopt(&ctx, &git, &["parent-feat".to_string()], None, false).unwrap();
         repo.create_branch("child-feat");
-        adopt::adopt(&ctx, &git, "child-feat", Some("parent-feat")).unwrap();
+        adopt::adopt(
+            &ctx,
+            &git,
+            &["child-feat".to_string()],
+            Some("parent-feat"),
+            false,
+        )
+        .unwrap();
 
         let reparented = drop(&ctx, &git, "parent-feat", false).unwrap();
 
@@ -147,7 +154,7 @@ mod tests {
     fn drop_errors_if_worktree_exists() {
         let (repo, ctx, git) = setup();
         repo.create_branch("wt-branch");
-        adopt::adopt(&ctx, &git, "wt-branch", None).unwrap();
+        adopt::adopt(&ctx, &git, &["wt-branch".to_string()], None, false).unwrap();
 
         // Manually set worktree_path in state
         let mut state = state::read_state(&ctx.state_path).unwrap().unwrap();
