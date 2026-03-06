@@ -4,7 +4,7 @@ use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::Shell;
 
 #[derive(Parser)]
-#[command(name = "wkm", about = "Git worktree manager")]
+#[command(name = "wkm", about = "Git worktree manager", version = env!("WKM_VERSION"))]
 struct Cli {
     #[command(subcommand)]
     command: Commands,

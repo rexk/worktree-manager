@@ -12,6 +12,7 @@ uuid = { workspace = true }
 chrono = { workspace = true }
 serde_json = { workspace = true }
 tempfile = { workspace = true }
+sha2 = "0.10"
 
 [dev-dependencies]
 wkm-sandbox = { workspace = true }

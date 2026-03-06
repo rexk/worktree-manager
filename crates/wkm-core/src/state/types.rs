@@ -39,6 +39,8 @@ pub struct WkmConfig {
     pub max_branch_length: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub storage_dir: Option<PathBuf>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolved_storage_dir: Option<PathBuf>,
 }
 
 impl WkmConfig {
@@ -50,6 +52,7 @@ impl WkmConfig {
             prefix: None,
             max_branch_length: None,
             storage_dir: None,
+            resolved_storage_dir: None,
         }
     }
 }

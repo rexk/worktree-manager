@@ -55,17 +55,34 @@ impl RepoContext {
         let state_path = git_common_dir.join("wkm.toml");
         let lock_path = git_common_dir.join("wkm.lock");
 
-        // Load existing state to check for per-repo config storage_dir
-        let config_storage_dir = state::read_state(&state_path)?.and_then(|s| s.config.storage_dir);
-
-        let base_dir = resolve_base_data_dir(config_storage_dir.as_deref())?;
-        let encoded_path = encoding::encode_path(main_worktree.to_string_lossy().as_ref());
-        let storage_dir = base_dir.join(encoded_path);
-
         let repo_name = main_worktree
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "repo".to_string());
+
+        // Load existing state to check for resolved or per-repo config storage_dir
+        let existing_state = state::read_state(&state_path)?;
+
+        let storage_dir = if let Some(ref state) = existing_state {
+            if let Some(ref resolved) = state.config.resolved_storage_dir {
+                // Already resolved — use persisted path directly
+                resolved.clone()
+            } else if state.config.storage_dir.is_some() {
+                // Per-repo override (legacy path)
+                let base_dir = resolve_base_data_dir(state.config.storage_dir.as_deref())?;
+                let hash = encoding::hash_path(main_worktree.to_string_lossy().as_ref());
+                base_dir.join(hash)
+            } else {
+                let base_dir = resolve_base_data_dir(None)?;
+                let hash = encoding::hash_path(main_worktree.to_string_lossy().as_ref());
+                base_dir.join(hash)
+            }
+        } else {
+            // No state yet (pre-init) — compute default
+            let base_dir = resolve_base_data_dir(None)?;
+            let hash = encoding::hash_path(main_worktree.to_string_lossy().as_ref());
+            base_dir.join(hash)
+        };
 
         Ok(Self {
             git_common_dir,
