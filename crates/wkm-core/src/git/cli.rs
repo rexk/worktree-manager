@@ -570,10 +570,7 @@ mod tests {
     fn discovery_main_worktree_path() {
         let (dir, git) = test_repo();
         let main_path = git.main_worktree_path().unwrap();
-        #[cfg(unix)]
-        let expected = dir.path().canonicalize().unwrap();
-        #[cfg(not(unix))]
-        let expected = dir.path().to_path_buf();
+        let expected = wkm_sandbox::canonicalize(dir.path());
         assert_eq!(main_path, expected);
     }
 

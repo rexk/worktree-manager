@@ -9,6 +9,23 @@ const NULL_DEVICE: &str = "/dev/null";
 #[cfg(windows)]
 const NULL_DEVICE: &str = "NUL";
 
+/// Canonicalize a path for test assertions.
+///
+/// On Unix, resolves symlinks (e.g. macOS `/var` → `/private/var`).
+/// On Windows, resolves 8.3 short names (e.g. `RUNNER~1` → `runneradmin`)
+/// without the `\\?\` UNC prefix that [`std::fs::canonicalize`] adds.
+pub fn canonicalize(path: &Path) -> PathBuf {
+    let p = std::fs::canonicalize(path).expect("failed to canonicalize");
+    #[cfg(windows)]
+    {
+        let s = p.to_string_lossy();
+        if let Some(stripped) = s.strip_prefix(r"\\?\") {
+            return PathBuf::from(stripped);
+        }
+    }
+    p
+}
+
 /// A temporary git repository for testing.
 ///
 /// Creates a fresh git repo with an initial commit on `main`.
@@ -29,16 +46,7 @@ impl TestRepo {
     /// Create a new git repo with an initial commit on `main`.
     pub fn new() -> Self {
         let dir = TempDir::new().expect("failed to create temp dir");
-        // Canonicalize on Unix to resolve symlinks (e.g. macOS /var → /private/var)
-        // so paths match what git returns. Skip on Windows where canonicalize()
-        // produces UNC paths (\\?\...) that don't match git output.
-        #[cfg(unix)]
-        let path = dir
-            .path()
-            .canonicalize()
-            .expect("failed to canonicalize tempdir");
-        #[cfg(not(unix))]
-        let path = dir.path().to_path_buf();
+        let path = canonicalize(dir.path());
 
         git(&path, &["init", "-b", "main"]);
         git(&path, &["config", "user.name", "Test User"]);
