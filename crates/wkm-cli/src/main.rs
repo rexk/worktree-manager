@@ -1,4 +1,5 @@
 mod commands;
+mod ui;
 
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::Shell;

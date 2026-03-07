@@ -4,6 +4,8 @@ use wkm_core::ops::merge;
 use wkm_core::repo::RepoContext;
 use wkm_core::state::types::MergeStrategy;
 
+use crate::ui;
+
 #[derive(Args)]
 pub struct MergeArgs {
     /// Branch to merge (omit for --all)
@@ -48,12 +50,44 @@ pub fn run(args: &MergeArgs) -> anyhow::Result<()> {
             println!("Merged: {}", merged.join(", "));
         }
     } else {
-        let branch = args
-            .branch
-            .as_deref()
-            .ok_or_else(|| anyhow::anyhow!("Specify a branch or use --all"))?;
-        merge::merge(&ctx, &git, &cwd, branch, strategy)?;
+        let branch = match &args.branch {
+            Some(b) => b.clone(),
+            None => pick_child(&ctx, &git, &cwd)?,
+        };
+        merge::merge(&ctx, &git, &cwd, &branch, strategy)?;
         println!("Merged '{branch}'");
     }
     Ok(())
+}
+
+fn pick_child(ctx: &RepoContext, git: &CliGit, cwd: &std::path::Path) -> anyhow::Result<String> {
+    if !ui::is_interactive() {
+        anyhow::bail!("Specify a branch or use --all");
+    }
+
+    let current = wkm_core::git::GitDiscovery::current_branch(git, cwd)?
+        .ok_or_else(|| anyhow::anyhow!("Not on a branch"))?;
+
+    let state = wkm_core::state::read_state(&ctx.state_path)?
+        .ok_or_else(|| anyhow::anyhow!("Not initialized"))?;
+
+    let children: Vec<String> = wkm_core::graph::children_of(&current, &state.branches)
+        .into_iter()
+        .map(|(name, _)| name.clone())
+        .collect();
+
+    if children.is_empty() {
+        anyhow::bail!("No children of '{current}' to merge");
+    }
+
+    let selection = dialoguer::FuzzySelect::new()
+        .with_prompt("Merge child branch")
+        .items(&children)
+        .default(0)
+        .interact_opt()?;
+
+    match selection {
+        Some(idx) => Ok(children[idx].clone()),
+        None => anyhow::bail!("Cancelled"),
+    }
 }

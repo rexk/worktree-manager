@@ -1,7 +1,9 @@
 use clap::{Args, Subcommand};
 use wkm_core::git::cli::CliGit;
-use wkm_core::ops::worktree;
+use wkm_core::ops::{list, worktree};
 use wkm_core::repo::RepoContext;
+
+use crate::ui;
 
 #[derive(Args)]
 pub struct WorktreeArgs {
@@ -65,10 +67,63 @@ pub fn run(args: &WorktreeArgs) -> anyhow::Result<()> {
             println!("Worktree: {}", result.worktree_path.display());
         }
         WorktreeCommands::Remove(remove_args) => {
-            let removed =
-                worktree::remove(&ctx, &git, remove_args.branch.as_deref(), remove_args.force)?;
-            println!("Removed worktree for '{removed}'");
+            let branch = match &remove_args.branch {
+                Some(b) => Some(b.as_str()),
+                None => None,
+            };
+            // Try the operation directly first — the core defaults to
+            // current branch when None. If that fails and we're interactive,
+            // offer a picker.
+            let result = worktree::remove(&ctx, &git, branch, remove_args.force);
+            match result {
+                Ok(removed) => println!("Removed worktree for '{removed}'"),
+                Err(e) if branch.is_none() && ui::is_interactive() => {
+                    // Current branch might not have a worktree, or we might be
+                    // in the main worktree. Offer a picker.
+                    let picked = pick_worktree_branch(&ctx, &git)?;
+                    // Show the original error context if the picker was needed
+                    // because of a specific error (e.g., NoWorktree for current branch)
+                    let _ = e; // consume original error
+                    let removed = worktree::remove(&ctx, &git, Some(&picked), remove_args.force)?;
+                    println!("Removed worktree for '{removed}'");
+                }
+                Err(e) => return Err(e.into()),
+            }
         }
     }
     Ok(())
+}
+
+fn pick_worktree_branch(ctx: &RepoContext, git: &CliGit) -> anyhow::Result<String> {
+    let entries = list::list(ctx, git)?;
+    let with_worktrees: Vec<_> = entries
+        .iter()
+        .filter(|e| e.worktree_path.is_some())
+        .collect();
+
+    if with_worktrees.is_empty() {
+        anyhow::bail!("No branches have worktrees to remove");
+    }
+
+    let items: Vec<String> = with_worktrees
+        .iter()
+        .map(|e| {
+            format!(
+                "{}  [{}]",
+                e.name,
+                e.worktree_path.as_ref().unwrap().display()
+            )
+        })
+        .collect();
+
+    let selection = dialoguer::FuzzySelect::new()
+        .with_prompt("Remove worktree for branch")
+        .items(&items)
+        .default(0)
+        .interact_opt()?;
+
+    match selection {
+        Some(idx) => Ok(with_worktrees[idx].name.clone()),
+        None => anyhow::bail!("Cancelled"),
+    }
 }

@@ -14,6 +14,8 @@ clap = { workspace = true }
 clap_complete = { workspace = true }
 serde_json = { workspace = true }
 anyhow = "1"
+console = "0.16"
+dialoguer = { version = "0.12", features = ["fuzzy-select"] }
 
 [dev-dependencies]
 wkm-sandbox = { workspace = true }

@@ -1,12 +1,14 @@
 use clap::Args;
 use wkm_core::git::cli::CliGit;
-use wkm_core::ops::checkout;
+use wkm_core::ops::{checkout, list};
 use wkm_core::repo::RepoContext;
+
+use crate::ui;
 
 #[derive(Args)]
 pub struct CheckoutArgs {
     /// Branch to checkout
-    pub branch: String,
+    pub branch: Option<String>,
     /// Create a new branch
     #[arg(short = 'b')]
     pub create: bool,
@@ -20,12 +22,56 @@ pub fn run(args: &CheckoutArgs) -> anyhow::Result<()> {
     let ctx = RepoContext::from_path(&cwd)?;
     let git = CliGit::new(&cwd);
 
+    let branch = match &args.branch {
+        Some(b) => b.clone(),
+        None => {
+            if args.create {
+                anyhow::bail!("Branch name required with -b");
+            }
+            pick_branch(&ctx, &git)?
+        }
+    };
+
     if args.create {
-        checkout::checkout_create(&ctx, &git, &cwd, &args.branch, None)?;
-        println!("Created and switched to '{}'", args.branch);
+        checkout::checkout_create(&ctx, &git, &cwd, &branch, None)?;
+        println!("Created and switched to '{branch}'");
     } else {
-        checkout::checkout(&ctx, &git, &cwd, &args.branch, args.include_untracked)?;
-        println!("Switched to '{}'", args.branch);
+        checkout::checkout(&ctx, &git, &cwd, &branch, args.include_untracked)?;
+        println!("Switched to '{branch}'");
     }
     Ok(())
+}
+
+fn pick_branch(ctx: &RepoContext, git: &CliGit) -> anyhow::Result<String> {
+    if !ui::is_interactive() {
+        anyhow::bail!("Branch argument required in non-interactive mode");
+    }
+
+    let entries = list::list(ctx, git)?;
+    if entries.is_empty() {
+        anyhow::bail!("No tracked branches");
+    }
+
+    let items: Vec<String> = entries
+        .iter()
+        .map(|e| {
+            let suffix = e
+                .parent
+                .as_deref()
+                .map(|p| format!("  (parent: {p})"))
+                .unwrap_or_default();
+            format!("{}{suffix}", e.name)
+        })
+        .collect();
+
+    let selection = dialoguer::FuzzySelect::new()
+        .with_prompt("Switch to branch")
+        .items(&items)
+        .default(0)
+        .interact_opt()?;
+
+    match selection {
+        Some(idx) => Ok(entries[idx].name.clone()),
+        None => anyhow::bail!("Cancelled"),
+    }
 }

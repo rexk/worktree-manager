@@ -3,6 +3,8 @@ use wkm_core::git::cli::CliGit;
 use wkm_core::ops::status;
 use wkm_core::repo::RepoContext;
 
+use crate::ui::Styles;
+
 #[derive(Args)]
 pub struct StatusArgs {
     /// Output as JSON
@@ -21,22 +23,31 @@ pub fn run(args: &StatusArgs) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    println!("Branch: {}", s.branch);
+    let styles = Styles::new();
+    println!("Branch: {}", styles.branch.apply_to(&s.branch));
     if let Some(ref parent) = s.parent {
-        print!("Parent: {parent}");
+        print!("Parent: {}", styles.branch.apply_to(parent));
         if let (Some(a), Some(b)) = (s.ahead_of_parent, s.behind_parent) {
-            print!(" (↑{a} ↓{b})");
+            print!(
+                " ({} {})",
+                styles.ahead.apply_to(format!("↑{a}")),
+                styles.behind.apply_to(format!("↓{b}"))
+            );
         }
         println!();
     }
     if let (Some(a), Some(b)) = (s.ahead_of_remote, s.behind_remote) {
-        println!("Remote: ↑{a} ↓{b}");
+        println!(
+            "Remote: {} {}",
+            styles.ahead.apply_to(format!("↑{a}")),
+            styles.behind.apply_to(format!("↓{b}"))
+        );
     }
     if s.is_dirty {
-        println!("Working tree: dirty");
+        println!("Working tree: {}", styles.dirty.apply_to("dirty"));
     }
     if let Some(ref op) = s.in_progress_op {
-        println!("In progress: {op}");
+        println!("In progress: {}", styles.in_progress.apply_to(op));
     }
     Ok(())
 }
