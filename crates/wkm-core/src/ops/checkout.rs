@@ -296,6 +296,11 @@ mod tests {
     use crate::ops::worktree::{self, CreateOptions};
     use wkm_sandbox::TestRepo;
 
+    #[cfg(not(windows))]
+    const NULL_DEVICE: &str = "/dev/null";
+    #[cfg(windows)]
+    const NULL_DEVICE: &str = "NUL";
+
     fn setup() -> (TestRepo, RepoContext, CliGit) {
         let repo = TestRepo::new();
         let ctx = RepoContext::from_path(repo.path()).unwrap();
@@ -507,8 +512,8 @@ mod tests {
         let _ = std::process::Command::new("git")
             .args(["rebase", "main"])
             .current_dir(&feature_wt)
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .env("GIT_CONFIG_GLOBAL", NULL_DEVICE)
+            .env("GIT_CONFIG_SYSTEM", NULL_DEVICE)
             .output();
 
         // Verify rebase is actually in progress

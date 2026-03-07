@@ -3,6 +3,12 @@ use std::process::Command;
 
 use tempfile::TempDir;
 
+/// Cross-platform null device path for suppressing git global/system config in tests.
+#[cfg(not(windows))]
+const NULL_DEVICE: &str = "/dev/null";
+#[cfg(windows)]
+const NULL_DEVICE: &str = "NUL";
+
 /// A temporary git repository for testing.
 ///
 /// Creates a fresh git repo with an initial commit on `main`.
@@ -23,9 +29,16 @@ impl TestRepo {
     /// Create a new git repo with an initial commit on `main`.
     pub fn new() -> Self {
         let dir = TempDir::new().expect("failed to create temp dir");
-        // Canonicalize to resolve symlinks (e.g. macOS /var → /private/var)
-        // so paths match what git returns.
-        let path = dir.path().canonicalize().expect("failed to canonicalize tempdir");
+        // Canonicalize on Unix to resolve symlinks (e.g. macOS /var → /private/var)
+        // so paths match what git returns. Skip on Windows where canonicalize()
+        // produces UNC paths (\\?\...) that don't match git output.
+        #[cfg(unix)]
+        let path = dir
+            .path()
+            .canonicalize()
+            .expect("failed to canonicalize tempdir");
+        #[cfg(not(unix))]
+        let path = dir.path().to_path_buf();
 
         git(&path, &["init", "-b", "main"]);
         git(&path, &["config", "user.name", "Test User"]);
@@ -141,8 +154,8 @@ impl TestRepo {
         let output = Command::new("git")
             .args(["rebase", "main"])
             .current_dir(&self.path)
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .env("GIT_CONFIG_GLOBAL", NULL_DEVICE)
+            .env("GIT_CONFIG_SYSTEM", NULL_DEVICE)
             .output()
             .expect("failed to run git rebase");
         assert!(
@@ -159,8 +172,8 @@ pub fn git(dir: &Path, args: &[&str]) -> std::process::Output {
     let output = Command::new("git")
         .args(args)
         .current_dir(dir)
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .env("GIT_CONFIG_GLOBAL", NULL_DEVICE)
+        .env("GIT_CONFIG_SYSTEM", NULL_DEVICE)
         .output()
         .expect("failed to run git");
     if !output.status.success() {

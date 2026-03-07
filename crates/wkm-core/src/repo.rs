@@ -40,10 +40,20 @@ fn resolve_base_data_dir(config_storage_dir: Option<&Path>) -> Result<PathBuf, W
         return Ok(PathBuf::from(dir).join("wkm"));
     }
 
-    let home = std::env::var("HOME").map(PathBuf::from).map_err(|_| {
-        WkmError::Other("could not determine home directory: HOME not set".to_string())
-    })?;
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .map(PathBuf::from)
+        .map_err(|_| {
+            WkmError::Other(
+                "could not determine home directory: neither HOME nor USERPROFILE is set"
+                    .to_string(),
+            )
+        })?;
 
+    #[cfg(windows)]
+    return Ok(home.join("AppData/Local/wkm"));
+
+    #[cfg(not(windows))]
     Ok(home.join(".local/share/wkm"))
 }
 

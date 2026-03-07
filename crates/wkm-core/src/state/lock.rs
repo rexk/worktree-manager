@@ -1,8 +1,5 @@
 use std::path::{Path, PathBuf};
 
-#[cfg(unix)]
-use libc;
-
 use crate::error::WkmError;
 
 /// A PID-based lockfile.

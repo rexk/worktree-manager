@@ -510,6 +510,11 @@ mod tests {
     use super::*;
     use crate::git::types::InProgressOp;
 
+    #[cfg(not(windows))]
+    const NULL_DEVICE: &str = "/dev/null";
+    #[cfg(windows)]
+    const NULL_DEVICE: &str = "NUL";
+
     fn test_repo() -> (tempfile::TempDir, CliGit) {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().to_path_buf();
@@ -527,8 +532,8 @@ mod tests {
         let output = Command::new("git")
             .args(args)
             .current_dir(dir)
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .env("GIT_CONFIG_GLOBAL", NULL_DEVICE)
+            .env("GIT_CONFIG_SYSTEM", NULL_DEVICE)
             .output()
             .unwrap();
         if !output.status.success() {
@@ -544,8 +549,8 @@ mod tests {
         let output = Command::new("git")
             .args(args)
             .current_dir(dir)
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .env("GIT_CONFIG_GLOBAL", NULL_DEVICE)
+            .env("GIT_CONFIG_SYSTEM", NULL_DEVICE)
             .output()
             .unwrap();
         String::from_utf8_lossy(&output.stdout).trim().to_string()
@@ -565,7 +570,11 @@ mod tests {
     fn discovery_main_worktree_path() {
         let (dir, git) = test_repo();
         let main_path = git.main_worktree_path().unwrap();
-        assert_eq!(main_path, dir.path().canonicalize().unwrap());
+        #[cfg(unix)]
+        let expected = dir.path().canonicalize().unwrap();
+        #[cfg(not(unix))]
+        let expected = dir.path().to_path_buf();
+        assert_eq!(main_path, expected);
     }
 
     #[test]
@@ -735,8 +744,8 @@ mod tests {
         let _ = Command::new("git")
             .args(["rebase", "main"])
             .current_dir(dir.path())
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .env("GIT_CONFIG_GLOBAL", NULL_DEVICE)
+            .env("GIT_CONFIG_SYSTEM", NULL_DEVICE)
             .output();
 
         let op = git.has_in_progress_operation(dir.path()).unwrap();
