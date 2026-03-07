@@ -61,10 +61,10 @@ pub fn create(
         }
 
         // Apply max length if configured
-        if let Some(max_len) = wkm_state.config.max_branch_length {
-            if generated.len() > max_len {
-                generated.truncate(max_len);
-            }
+        if let Some(max_len) = wkm_state.config.max_branch_length
+            && generated.len() > max_len
+        {
+            generated.truncate(max_len);
         }
 
         generated
@@ -81,10 +81,10 @@ pub fn create(
             .find(|(_, e)| e.worktree_path.as_ref() == Some(&worktree_path))
             .map(|(name, _)| name.clone());
 
-        if let Some(ref existing) = existing_branch {
-            if existing != &opts.branch {
-                return Err(WkmError::DirectoryCollision(opts.branch.clone()));
-            }
+        if let Some(ref existing) = existing_branch
+            && existing != &opts.branch
+        {
+            return Err(WkmError::DirectoryCollision(opts.branch.clone()));
         }
     }
 
@@ -171,10 +171,10 @@ pub fn remove(
         .ok_or_else(|| WkmError::NoWorktree(branch_name.clone()))?;
 
     // Check if we're inside the worktree
-    if let Ok(cwd) = std::env::current_dir() {
-        if cwd.starts_with(&worktree_path) {
-            return Err(WkmError::RemoveFromInside);
-        }
+    if let Ok(cwd) = std::env::current_dir()
+        && cwd.starts_with(&worktree_path)
+    {
+        return Err(WkmError::RemoveFromInside);
     }
 
     // Update state first — clear worktree_path before touching the filesystem

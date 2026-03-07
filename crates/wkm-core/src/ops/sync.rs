@@ -35,10 +35,10 @@ pub fn sync(
         .branches
         .iter()
         .filter_map(|(name, entry)| {
-            if let Some(ref wt_path) = entry.worktree_path {
-                if git.is_dirty(wt_path).unwrap_or(false) {
-                    return Some(name.clone());
-                }
+            if let Some(ref wt_path) = entry.worktree_path
+                && git.is_dirty(wt_path).unwrap_or(false)
+            {
+                return Some(name.clone());
             }
             None
         })
@@ -105,14 +105,13 @@ pub fn sync(
 
     for branch in &branches_to_sync {
         // Skip if parent was conflicted
-        if let Some(entry) = wkm_state.branches.get(branch) {
-            if let Some(ref parent) = entry.parent {
-                if skip_children_of.contains(parent) {
-                    skip_children_of.push(branch.clone());
-                    skipped.push(branch.clone());
-                    continue;
-                }
-            }
+        if let Some(entry) = wkm_state.branches.get(branch)
+            && let Some(ref parent) = entry.parent
+            && skip_children_of.contains(parent)
+        {
+            skip_children_of.push(branch.clone());
+            skipped.push(branch.clone());
+            continue;
         }
 
         let parent = wkm_state
@@ -381,10 +380,10 @@ pub fn sync_abort(
 
     // Abort any in-progress rebase in branch worktrees
     for (branch, entry) in &wkm_state.branches {
-        if let Some(ref wt_path) = entry.worktree_path {
-            if let Ok(Some(_)) = git.has_in_progress_operation(wt_path) {
-                let _ = git.rebase_abort(wt_path);
-            }
+        if let Some(ref wt_path) = entry.worktree_path
+            && let Ok(Some(_)) = git.has_in_progress_operation(wt_path)
+        {
+            let _ = git.rebase_abort(wt_path);
         }
         // Clean up temp branches
         let temp_branch = format!("_wkm/rebase/{branch}");
@@ -413,24 +412,23 @@ fn update_sync_wal(
     all_branches: &[String],
     temp_worktrees: &[(String, PathBuf)],
 ) {
-    if let Some(ref mut wal) = wkm_state.wal {
-        if let WalOp::Sync {
+    if let Some(ref mut wal) = wkm_state.wal
+        && let WalOp::Sync {
             completed: ref mut c,
             conflicted: ref mut conf,
             pending: ref mut p,
             temp_worktrees: ref mut tw,
             ..
         } = wal.op
-        {
-            *c = completed.to_vec();
-            *conf = conflicted.clone();
-            *p = all_branches
-                .iter()
-                .filter(|b| !completed.contains(b))
-                .cloned()
-                .collect();
-            *tw = temp_worktrees.to_vec();
-        }
+    {
+        *c = completed.to_vec();
+        *conf = conflicted.clone();
+        *p = all_branches
+            .iter()
+            .filter(|b| !completed.contains(b))
+            .cloned()
+            .collect();
+        *tw = temp_worktrees.to_vec();
     }
 }
 

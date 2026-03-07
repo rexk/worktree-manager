@@ -62,11 +62,11 @@ pub fn repair(
 
     // 4. Clear worktree_path for entries where the path no longer exists
     for (name, entry) in wkm_state.branches.iter_mut() {
-        if let Some(ref wt_path) = entry.worktree_path {
-            if !wt_path.exists() {
-                entry.worktree_path = None;
-                result.worktree_paths_cleared.push(name.clone());
-            }
+        if let Some(ref wt_path) = entry.worktree_path
+            && !wt_path.exists()
+        {
+            entry.worktree_path = None;
+            result.worktree_paths_cleared.push(name.clone());
         }
     }
 
@@ -75,10 +75,10 @@ pub fn repair(
     // Collect all _wkm/* branches that exist
     let mut orphan_candidates: Vec<String> = Vec::new();
     for wt in &worktrees {
-        if let Some(ref branch) = wt.branch {
-            if branch.starts_with("_wkm/") {
-                orphan_candidates.push(branch.clone());
-            }
+        if let Some(ref branch) = wt.branch
+            && branch.starts_with("_wkm/")
+        {
+            orphan_candidates.push(branch.clone());
         }
     }
 
@@ -107,17 +107,18 @@ pub fn repair(
     }
 
     // 6. Clean up leftover .wkm-removing directories in storage_dir
-    if ctx.storage_dir.exists() {
-        if let Ok(entries) = std::fs::read_dir(&ctx.storage_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_dir() && path.extension().map_or(false, |ext| ext == "wkm-removing") {
-                    if std::fs::remove_dir_all(&path).is_ok() {
-                        result
-                            .pending_removals_cleaned
-                            .push(path.display().to_string());
-                    }
-                }
+    if ctx.storage_dir.exists()
+        && let Ok(entries) = std::fs::read_dir(&ctx.storage_dir)
+    {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir()
+                && path.extension().is_some_and(|ext| ext == "wkm-removing")
+                && std::fs::remove_dir_all(&path).is_ok()
+            {
+                result
+                    .pending_removals_cleaned
+                    .push(path.display().to_string());
             }
         }
     }

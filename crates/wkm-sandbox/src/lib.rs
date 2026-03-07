@@ -13,6 +13,12 @@ pub struct TestRepo {
     _remote_dir: Option<TempDir>,
 }
 
+impl Default for TestRepo {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TestRepo {
     /// Create a new git repo with an initial commit on `main`.
     pub fn new() -> Self {

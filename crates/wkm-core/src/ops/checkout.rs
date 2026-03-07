@@ -70,27 +70,25 @@ pub fn checkout(
         )?;
     } else {
         // Simple checkout — target not in any worktree
-        if git.is_dirty(worktree)? {
-            if git.has_changes_for_stash(worktree)? {
-                let hash = git.stash_push(
-                    worktree,
-                    &format!("wkm: auto-stash for checkout to {target_branch}"),
-                    include_untracked,
-                )?;
-                if let Some(entry) = wkm_state.branches.get_mut(&current_branch) {
-                    entry.stash_commit = Some(hash);
-                }
+        if git.is_dirty(worktree)? && git.has_changes_for_stash(worktree)? {
+            let hash = git.stash_push(
+                worktree,
+                &format!("wkm: auto-stash for checkout to {target_branch}"),
+                include_untracked,
+            )?;
+            if let Some(entry) = wkm_state.branches.get_mut(&current_branch) {
+                entry.stash_commit = Some(hash);
             }
         }
 
         git.checkout(worktree, target_branch)?;
 
         // Restore any stash for the target branch
-        if let Some(entry) = wkm_state.branches.get_mut(target_branch) {
-            if let Some(ref stash_hash) = entry.stash_commit.clone() {
-                let _ = git.stash_apply(worktree, stash_hash, true);
-                entry.stash_commit = None;
-            }
+        if let Some(entry) = wkm_state.branches.get_mut(target_branch)
+            && let Some(ref stash_hash) = entry.stash_commit.clone()
+        {
+            let _ = git.stash_apply(worktree, stash_hash, true);
+            entry.stash_commit = None;
         }
 
         // Update previous_branch
@@ -155,6 +153,7 @@ pub fn checkout_create(
 }
 
 /// Perform swap checkout: stash both worktrees, use hold branch, swap.
+#[allow(clippy::too_many_arguments)]
 fn swap_checkout(
     ctx: &RepoContext,
     git: &(impl GitDiscovery + GitBranches + GitWorktrees + GitStatus + GitStash + GitMutations),
@@ -279,13 +278,12 @@ fn swap_checkout(
 }
 
 fn update_swap_step(wkm_state: &mut state::types::WkmState, step: SwapStep) {
-    if let Some(ref mut wal) = wkm_state.wal {
-        if let WalOp::Swap {
+    if let Some(ref mut wal) = wkm_state.wal
+        && let WalOp::Swap {
             step: ref mut s, ..
         } = wal.op
-        {
-            *s = step;
-        }
+    {
+        *s = step;
     }
 }
 

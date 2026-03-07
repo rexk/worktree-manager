@@ -19,10 +19,10 @@ pub fn list(
     let mut entries = Vec::new();
     for (name, entry) in &wkm_state.branches {
         if let Some(ref commit) = entry.stash_commit {
-            if let Some(filter) = branch_filter {
-                if name != filter {
-                    continue;
-                }
+            if let Some(filter) = branch_filter
+                && name != filter
+            {
+                continue;
             }
             entries.push(WkmStashEntry {
                 branch: name.clone(),

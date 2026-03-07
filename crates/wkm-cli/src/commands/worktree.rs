@@ -67,10 +67,7 @@ pub fn run(args: &WorktreeArgs) -> anyhow::Result<()> {
             println!("Worktree: {}", result.worktree_path.display());
         }
         WorktreeCommands::Remove(remove_args) => {
-            let branch = match &remove_args.branch {
-                Some(b) => Some(b.as_str()),
-                None => None,
-            };
+            let branch = remove_args.branch.as_deref();
             // Try the operation directly first — the core defaults to
             // current branch when None. If that fails and we're interactive,
             // offer a picker.

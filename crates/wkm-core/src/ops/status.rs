@@ -77,9 +77,9 @@ pub fn status(
         branch: branch_name,
         parent,
         ahead_of_parent: ahead_parent,
-        behind_parent: behind_parent,
+        behind_parent,
         ahead_of_remote: ahead_remote,
-        behind_remote: behind_remote,
+        behind_remote,
         is_dirty,
         in_progress_op,
     })

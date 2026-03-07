@@ -47,19 +47,19 @@ pub fn merge(
     if git.is_dirty(worktree)? {
         return Err(WkmError::DirtyWorktree(current_branch.clone()));
     }
-    if let Some(ref wt_path) = child_entry.worktree_path {
-        if git.is_dirty(wt_path)? {
-            return Err(WkmError::DirtyWorktree(child_branch.to_string()));
-        }
+    if let Some(ref wt_path) = child_entry.worktree_path
+        && git.is_dirty(wt_path)?
+    {
+        return Err(WkmError::DirtyWorktree(child_branch.to_string()));
     }
 
     // Check descendants for dirty worktrees
     let descendants = graph::descendants_of(child_branch, &wkm_state.branches);
     for (desc_name, desc_entry) in &descendants {
-        if let Some(ref wt_path) = desc_entry.worktree_path {
-            if git.is_dirty(wt_path)? {
-                return Err(WkmError::DirtyWorktree((*desc_name).clone()));
-            }
+        if let Some(ref wt_path) = desc_entry.worktree_path
+            && git.is_dirty(wt_path)?
+        {
+            return Err(WkmError::DirtyWorktree((*desc_name).clone()));
         }
     }
 
@@ -255,10 +255,10 @@ pub fn merge_abort(
             }
 
             // Restore worktree if it existed
-            if let Some(wt_path) = worktree_path {
-                if !wt_path.exists() {
-                    let _ = git.worktree_add(wt_path, child_branch);
-                }
+            if let Some(wt_path) = worktree_path
+                && !wt_path.exists()
+            {
+                let _ = git.worktree_add(wt_path, child_branch);
             }
 
             // Restore child in state

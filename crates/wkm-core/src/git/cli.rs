@@ -223,10 +223,10 @@ impl GitWorktrees for CliGit {
                             .to_string(),
                     );
                 }
-            } else if line == "bare" {
-                if let Some(ref mut wt) = current {
-                    wt.is_bare = true;
-                }
+            } else if line == "bare"
+                && let Some(ref mut wt) = current
+            {
+                wt.is_bare = true;
             }
         }
         if let Some(wt) = current {
