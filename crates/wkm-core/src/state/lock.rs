@@ -1,5 +1,8 @@
 use std::path::{Path, PathBuf};
 
+#[cfg(unix)]
+use libc;
+
 use crate::error::WkmError;
 
 /// A PID-based lockfile.
@@ -90,7 +93,21 @@ impl Drop for WkmLock {
 }
 
 fn is_process_alive(pid: u32) -> bool {
-    Path::new(&format!("/proc/{pid}")).exists()
+    #[cfg(unix)]
+    {
+        // SAFETY: kill with signal 0 checks if the process exists without sending a signal.
+        // This is safe because signal 0 has no effect on the target process.
+        unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
+    }
+    #[cfg(not(unix))]
+    {
+        // Fallback: shell out to tasklist (Windows) or assume alive
+        std::process::Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {pid}"), "/NH"])
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).contains(&pid.to_string()))
+            .unwrap_or(true)
+    }
 }
 
 #[cfg(test)]

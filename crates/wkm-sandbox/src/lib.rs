@@ -23,7 +23,9 @@ impl TestRepo {
     /// Create a new git repo with an initial commit on `main`.
     pub fn new() -> Self {
         let dir = TempDir::new().expect("failed to create temp dir");
-        let path = dir.path().to_path_buf();
+        // Canonicalize to resolve symlinks (e.g. macOS /var → /private/var)
+        // so paths match what git returns.
+        let path = dir.path().canonicalize().expect("failed to canonicalize tempdir");
 
         git(&path, &["init", "-b", "main"]);
         git(&path, &["config", "user.name", "Test User"]);
