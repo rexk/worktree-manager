@@ -1,12 +1,12 @@
 [package]
-name = "wkm-cli"
+name = "wkm"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-
-[[bin]]
-name = "wkm"
-path = "src/main.rs"
+description = "CLI for wkm — git worktree manager with cascade rebase"
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [dependencies]
 wkm-core = { workspace = true }

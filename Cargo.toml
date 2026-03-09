@@ -6,9 +6,13 @@ resolver = "2"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
+description = "Git worktree manager with parent-child branch relationships and cascade rebase"
+repository = "https://github.com/rexk/worktree-manager"
+keywords = ["git", "worktree", "cli", "branch"]
+categories = ["command-line-utilities", "development-tools"]
 
 [workspace.dependencies]
-wkm-core = { path = "crates/wkm-core" }
+wkm-core = { path = "crates/wkm-core", version = "0.1.0" }
 wkm-sandbox = { path = "crates/wkm-sandbox" }
 clap = { version = "4", features = ["derive"] }
 clap_complete = "4"

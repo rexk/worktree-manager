@@ -4,12 +4,17 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=../../.git/HEAD");
     println!("cargo:rerun-if-changed=../../.git/index");
+    println!("cargo:rerun-if-env-changed=WKM_RELEASE");
 
     let base = env!("CARGO_PKG_VERSION");
 
-    let version = match git_dev_suffix() {
-        Some(suffix) => format!("{base}-dev ({suffix})"),
-        None => base.to_string(),
+    let version = if std::env::var("WKM_RELEASE").is_ok() {
+        base.to_string()
+    } else {
+        match git_dev_suffix() {
+            Some(suffix) => format!("{base}-dev ({suffix})"),
+            None => base.to_string(),
+        }
     };
 
     println!("cargo:rustc-env=WKM_VERSION={version}");

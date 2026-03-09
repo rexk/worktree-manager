@@ -1,0 +1,185 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (draft release, skip crates.io publish)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  validate:
+    name: Validate version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      dry_run: ${{ steps.mode.outputs.dry_run }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Determine run mode
+        id: mode
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "dry_run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "dry_run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Extract version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          else
+            TAG="${GITHUB_REF#refs/tags/v}"
+            echo "version=$TAG" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Verify Cargo.toml version matches tag
+        if: github.event_name != 'workflow_dispatch'
+        run: |
+          CARGO_VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          TAG_VERSION="${GITHUB_REF#refs/tags/v}"
+          if [ "$CARGO_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::Tag version ($TAG_VERSION) does not match Cargo.toml version ($CARGO_VERSION)"
+            exit 1
+          fi
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: validate
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+            cross: false
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-latest
+            cross: true
+          - target: x86_64-apple-darwin
+            runner: macos-13
+            cross: false
+          - target: aarch64-apple-darwin
+            runner: macos-latest
+            cross: false
+          - target: x86_64-pc-windows-msvc
+            runner: windows-latest
+            cross: false
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross
+        if: matrix.cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Build
+        env:
+          WKM_RELEASE: "1"
+        run: |
+          if [ "${{ matrix.cross }}" = "true" ]; then
+            cross build --release --target ${{ matrix.target }} -p wkm
+          else
+            cargo build --release --target ${{ matrix.target }} -p wkm
+          fi
+        shell: bash
+
+      - name: Package (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          VERSION="${{ needs.validate.outputs.version }}"
+          ARCHIVE="wkm-${VERSION}-${{ matrix.target }}.tar.gz"
+          mkdir staging
+          cp target/${{ matrix.target }}/release/wkm staging/
+          cp LICENSE README.md staging/
+          cd staging
+          tar czf "../${ARCHIVE}" *
+          cd ..
+          echo "ARCHIVE=${ARCHIVE}" >> "$GITHUB_ENV"
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          VERSION="${{ needs.validate.outputs.version }}"
+          ARCHIVE="wkm-${VERSION}-${{ matrix.target }}.zip"
+          mkdir staging
+          cp target/${{ matrix.target }}/release/wkm.exe staging/
+          cp LICENSE README.md staging/
+          cd staging
+          7z a "../${ARCHIVE}" *
+          cd ..
+          echo "ARCHIVE=${ARCHIVE}" >> "$GITHUB_ENV"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wkm-${{ matrix.target }}
+          path: ${{ env.ARCHIVE }}
+
+  release:
+    name: Create GitHub Release
+    needs: [validate, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.validate.outputs.version }}
+          target_commitish: ${{ github.event_name == 'workflow_dispatch' && github.sha || '' }}
+          draft: ${{ needs.validate.outputs.dry_run == 'true' }}
+          generate_release_notes: true
+          files: artifacts/*
+
+  publish:
+    name: Publish to crates.io
+    needs: [validate, release]
+    if: needs.validate.outputs.dry_run != 'true' && !contains(needs.validate.outputs.version, '-')
+    runs-on: ubuntu-latest
+    environment: crates-io
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Publish wkm-core
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish -p wkm-core
+
+      - name: Wait for crates.io index
+        run: sleep 30
+
+      - name: Publish wkm
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish -p wkm
