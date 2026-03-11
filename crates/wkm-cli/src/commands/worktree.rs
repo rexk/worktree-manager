@@ -16,7 +16,7 @@ pub enum WorktreeCommands {
     /// Create a new worktree
     Create(CreateArgs),
     /// Remove a worktree
-    #[command(alias = "rm")]
+    #[command(visible_alias = "rm")]
     Remove(RemoveArgs),
 }
 

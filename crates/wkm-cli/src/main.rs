@@ -16,24 +16,24 @@ enum Commands {
     /// Initialize wkm for the current repository
     Init(commands::init::InitArgs),
     /// List tracked branches
-    #[command(alias = "ls")]
+    #[command(visible_alias = "ls")]
     List(commands::list::ListArgs),
     /// Show status of current branch
     Status(commands::status::StatusArgs),
     /// Show branch graph
     Graph(commands::graph::GraphArgs),
     /// Print worktree path for a branch
-    #[command(alias = "wp")]
+    #[command(visible_alias = "wp")]
     WorktreePath(commands::cd::CdArgs),
     /// Output shell wrapper for wkm wp integration
     ShellSetup(commands::shell_setup::ShellSetupArgs),
     /// Manage worktrees
-    #[command(alias = "wt")]
+    #[command(visible_alias = "wt")]
     Worktree(commands::worktree::WorktreeArgs),
     /// Adopt an existing branch
     Adopt(commands::adopt::AdoptArgs),
     /// Switch to a branch
-    #[command(alias = "co")]
+    #[command(visible_alias = "co")]
     Checkout(commands::checkout::CheckoutArgs),
     /// Sync branches by rebasing onto parents
     Sync(commands::sync::SyncArgs),
