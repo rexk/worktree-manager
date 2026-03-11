@@ -14,10 +14,18 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  ci:
+    name: CI
+    uses: ./.github/workflows/ci.yml
+
   validate:
     name: Validate version
     runs-on: ubuntu-latest
@@ -59,7 +67,7 @@ jobs:
 
   build:
     name: Build ${{ matrix.target }}
-    needs: validate
+    needs: [ci, validate]
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
