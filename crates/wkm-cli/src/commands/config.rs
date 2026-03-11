@@ -22,6 +22,8 @@ pub enum ConfigCommands {
         /// Config value
         value: String,
     },
+    /// List all config values
+    List,
 }
 
 pub fn run(args: &ConfigArgs) -> anyhow::Result<()> {
@@ -49,6 +51,24 @@ pub fn run(args: &ConfigArgs) -> anyhow::Result<()> {
                 _ => anyhow::bail!("unknown config key: {key}"),
             };
             println!("{value}");
+        }
+        ConfigCommands::List => {
+            let wkm_state = state::read_state(&ctx.state_path)?
+                .ok_or_else(|| anyhow::anyhow!("wkm is not initialized"))?;
+            let cfg = &wkm_state.config;
+            println!("base_branch={}", cfg.base_branch);
+            println!("merge_strategy={:?}", cfg.merge_strategy);
+            println!("naming_strategy={:?}", cfg.naming_strategy);
+            println!(
+                "prefix={}",
+                cfg.prefix.as_deref().unwrap_or("(unset)")
+            );
+            println!(
+                "max_branch_length={}",
+                cfg.max_branch_length
+                    .map(|n| n.to_string())
+                    .unwrap_or_else(|| "(unset)".to_string())
+            );
         }
         ConfigCommands::Set { key, value } => {
             let mut wkm_state = state::read_state(&ctx.state_path)?
