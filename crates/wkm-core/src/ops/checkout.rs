@@ -381,7 +381,6 @@ mod tests {
             &git,
             &CreateOptions {
                 branch: "feature".to_string(),
-                name: None,
                 base: None,
                 description: None,
             },
@@ -412,7 +411,6 @@ mod tests {
             &git,
             &CreateOptions {
                 branch: "feature".to_string(),
-                name: None,
                 base: None,
                 description: None,
             },
@@ -451,7 +449,6 @@ mod tests {
             &git,
             &CreateOptions {
                 branch: "feature".to_string(),
-                name: None,
                 base: None,
                 description: None,
             },
@@ -482,7 +479,6 @@ mod tests {
             &git,
             &CreateOptions {
                 branch: "feature".to_string(),
-                name: None,
                 base: None,
                 description: None,
             },
@@ -543,7 +539,6 @@ mod tests {
             &git,
             &CreateOptions {
                 branch: "feature".to_string(),
-                name: None,
                 base: None,
                 description: None,
             },

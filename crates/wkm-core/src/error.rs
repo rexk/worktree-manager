@@ -38,9 +38,6 @@ pub enum WkmError {
     #[error("branch '{0}' is not fast-forwardable. Run `wkm sync` first")]
     NotFastForward(String),
 
-    #[error("directory collision for '{0}'. Use `wkm worktree create --name <name>` instead")]
-    DirectoryCollision(String),
-
     #[error("cannot remove worktree from inside it. Run from a different worktree or use `wkm wp`")]
     RemoveFromInside,
 

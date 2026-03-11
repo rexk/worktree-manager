@@ -33,7 +33,7 @@ cargo run -p wkm-cli -- <command>    # Run the CLI
 - **`state/`** — TOML state file (`wkm.toml` in `.git/`) with atomic writes, PID-based file locking (`lock.rs`), and a write-ahead log (WAL) for crash recovery.
 - **`repo.rs`** — `RepoContext`: resolves `.git` dir, main worktree path, state file path, and storage directory from any worktree location.
 - **`graph.rs`** — Branch relationship graph: `children_of`, `descendants_of`, `topo_sort`, `ascii_tree`.
-- **`encoding.rs`** — Filesystem-safe encoding of paths/branch names (`/` → `--`, percent-encoding).
+- **`encoding.rs`** — Path hashing (`hash_path`) and random worktree ID generation (`generate_worktree_id`).
 - **`error.rs`** — All error types via `thiserror`.
 
 ### Key Design Decisions
@@ -44,11 +44,11 @@ cargo run -p wkm-cli -- <command>    # Run the CLI
 - **WAL**: write-ahead log entries allow crash recovery of multi-step operations.
 - **Swap operation** in checkout: moves a checked-out branch between worktrees.
 - **Cascade rebase** in sync: topologically sorts descendants and rebases each onto its updated parent.
-- **Storage directory**: `<base-dir>/<encoded-repo-path>/<encoded-branch>/<repo-name>/` for worktrees. Base dir resolved by: per-repo `config.storage_dir` → `WKM_DATA_DIR` env → `XDG_DATA_HOME/wkm/` → `~/.local/share/wkm/`. `<repo-name>` is the last component of the main worktree path (so the terminal prompt shows the repo name).
+- **Storage directory**: `<base-dir>/<hashed-repo-path>/<random-worktree-id>/<repo-name>/` for worktrees. Base dir resolved by: per-repo `config.storage_dir` → `WKM_DATA_DIR` env → `XDG_DATA_HOME/wkm/` → `~/.local/share/wkm/`. `<repo-name>` is the last component of the main worktree path (so the terminal prompt shows the repo name).
 
 ### Testing
 
-Tests use `wkm-sandbox::TestRepo` which creates a temporary bare repo + worktree. Property-based tests (proptest) validate encoding roundtrips.
+Tests use `wkm-sandbox::TestRepo` which creates a temporary bare repo + worktree.
 
 ## Documentation
 

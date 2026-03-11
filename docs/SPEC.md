@@ -52,19 +52,19 @@ Managing multiple simultaneous workstreams across AI agents and interactive deve
     .git/wkm.{json,toml}                        # Worktree state file
     .git/wkm.lock                               # Lockfile (when operations in progress)
 
-~/.local/share/wkm/<encoded-main-worktree-path>/
-    <encoded-branch-name>/
+~/.local/share/wkm/<hashed-main-worktree-path>/
+    <worktree-id>/
         <repo-name>/                            # Linked worktree
-    <encoded-branch-name>/
+    <worktree-id>/
         <repo-name>/                            # Linked worktree
 ```
 
 ### 5.2 Directory Convention
 
-Worktree storage path is derived from the main worktree's local filesystem path and branch name, both encoded to produce unique directory names:
+Worktree storage path is derived from the main worktree's local filesystem path and a random worktree ID:
 
 ```
-<base-dir>/<encoded-main-worktree-path>/<encoded-branch-name>/<repo-name>/
+<base-dir>/<hashed-main-worktree-path>/<worktree-id>/<repo-name>/
 ```
 
 The `<base-dir>` is resolved using tiered priority:
@@ -76,15 +76,13 @@ The `<base-dir>` is resolved using tiered priority:
 
 The fallback deliberately avoids platform-specific directories (e.g., macOS `~/Library/Application Support/`) because spaces in paths break tools like nix, devenv, and direnv.
 
-The `<repo-name>` is the last component of the main worktree path (e.g., `/home/user/data-pipelines` → `data-pipelines`). This makes the terminal prompt show the repository name instead of the encoded branch name, since terminal tools (starship, oh-my-zsh) already display the git branch.
+The `<repo-name>` is the last component of the main worktree path (e.g., `/home/user/data-pipelines` → `data-pipelines`). This makes the terminal prompt show the repository name instead of an opaque ID, since terminal tools (starship, oh-my-zsh) already display the git branch.
 
-**Encoding requirements:**
-- The encoding must be deterministic (same input → same encoded directory).
-- The encoding is **best-effort collision-resistant** — designed to avoid collisions but not guaranteed collision-free.
-- Both the main worktree path and the branch name are encoded using the same algorithm.
-- Branch names containing `/` (e.g., `rex/feature-auth`) must be encoded to a flat directory name (not nested directories).
-- **Collision handling:** If a target directory already exists for a different branch, abort with a clear error suggesting the user provide an explicit name. No silent overwriting.
-- The exact encoding algorithm is an implementation decision.
+**Worktree ID requirements:**
+- `<worktree-id>` is an 8-character random lowercase hex string generated at worktree creation time.
+- Not derived from the branch name — the directory is opaque and branch-agnostic. Rationale: branch names in directory paths become stale when users change branches inside worktrees (via `git checkout`, `wkm checkout` swap, or `wkm checkout -b`). Tools that fully manage worktree lifecycle (Cursor, Codex, Claude Code) use opaque IDs for this reason.
+- **Collision handling:** If a generated ID already exists on disk, regenerate (statistically near-impossible with 32 bits of randomness at typical worktree counts).
+- `<hashed-main-worktree-path>` uses SHA-256 (first 8 hex chars) for a deterministic, filesystem-safe repo identifier.
 
 **This convention:**
 - Is always available (no dependency on git remote being configured).
@@ -140,6 +138,8 @@ _wkm/rebase/<branch>        # Rebase workspace: temporary worktree for rebasing 
 **When no name is specified:** Default strategy is `timestamp`: `<parent>-YYYYMMDD-HHMM` (e.g., `feature-auth-20260219-1430`). If a prefix is configured: `<prefix>/<parent>-YYYYMMDD-HHMM`.
 
 **Configurable alternatives** (future): `random` (adjective-noun), custom strategies via config.
+
+**Note:** `prefix` and `max_branch_length` config options apply to **branch naming** only, not worktree directory naming. Worktree directories use opaque random IDs (see §5.2).
 
 **Contract rules:**
 - No nested `/` beyond a single prefix level (avoids git ref conflicts where a path component is both a file and directory in `.git/refs/heads/`).
@@ -230,7 +230,7 @@ Mutating commands (`checkout`, `worktree create`, `worktree remove`, `sync`, `me
 | ID | Requirement |
 |----|-------------|
 | FR-38 | The system must support structured output (e.g., `--json` flag) for programmatic scripting and composability, in addition to human-readable output as the default. |
-| FR-39 | The system must enforce deterministic folder conventions for spawned workspaces. |
+| FR-39 | The system must enforce consistent folder conventions for spawned workspaces. |
 | FR-40 | The system must provide recovery/repair operations (see §7.3). |
 | FR-41 | Cleanup prompts and confirmations must be skippable via `--yes`/`--force` flags for non-interactive/agent use. |
 | FR-42 | The system must support configurable branch naming strategies (prefix, generation method, max length). |
@@ -324,8 +324,7 @@ Mutating commands (`checkout`, `worktree create`, `worktree remove`, `sync`, `me
 
 1. If `feature-auth` is already checked out in a worktree: error with actionable suggestions.
 2. Acquire lockfile. Re-validate preconditions.
-3. Determine the worktree path: `~/.local/share/wkm/<encoded-main-path>/<encoded-branch-name>/`.
-4. If target directory already exists (encoding collision): error with suggestion to use an explicit name.
+3. Generate a random 8-hex-char worktree ID. Determine the worktree path: `<storage-dir>/<worktree-id>/<repo-name>/`. If the generated directory already exists, regenerate the ID.
 5. If branch `feature-auth` doesn't exist, create it from the current branch (or `-b base`).
 6. If branch exists but is not tracked in wkm state: adopt it — record the parent as the `-b` value if specified, otherwise default to the **current branch**. Warn: "Branch `feature-auth` exists but is not tracked by wkm. Adopting with parent `<parent>`." (Implementation note: also check `git worktree list` in case it's checked out in a manual worktree path that differs from the convention).
 7. Run `git worktree add <absolute-path> feature-auth`.
@@ -512,7 +511,7 @@ These are documented for awareness, not blockers:
 | devenv port conflicts | Multiple `devenv up` instances compete for ports | devenv supports `ports.<name>.allocate` for dynamic allocation; this is a per-repo config concern, not wkm's scope |
 | Claude Code background tasks in worktrees ([#13087]) | Background tasks may fail to detect git repo | Agents own their worktree sessions atomically; not a practical concern |
 | Git ref naming constraint | Cannot have both `feature-auth` (file) and `feature-auth/x` (directory) in `.git/refs/heads/` | Branch naming convention limits `/` to a single prefix level only; `wkm repair` detects conflicting `_wkm` branches |
-| Directory encoding collisions | Different branch names or paths could theoretically produce the same encoded directory | Best-effort encoding with collision detection and user-facing error |
+| Worktree ID collisions | Two worktrees could theoretically generate the same random ID | 8-char random hex (32 bits); regenerate on collision; statistically negligible for worktree counts |
 | Git stash is repository-global | `refs/stash` is shared across all worktrees; no per-worktree stash isolation | Stash commits tracked by hash in WAL and branch metadata; left in reflog to protect from GC; `wkm repair` cleans up stale entries not referenced by any active WAL or branch metadata. |
 | External git operations not blocked by lockfile | Users or other tools can modify the repo while wkm holds its lock | wkm only locks its own state; git-level races are detected reactively and surfaced with `wkm repair` suggestion |
 | `git worktree list` main worktree detection | The first entry in `git worktree list` is the main working tree; explicit "main" label only available since git 2.36+ | Implementation should use the first entry's path, not rely on label text |
@@ -524,7 +523,7 @@ These are documented for awareness, not blockers:
 | Implementation language | Rust, Go, Zig, shell script | Rust has strong git ecosystem (gitoxide); Go is simpler; shell is fastest to prototype |
 | State file format | JSON vs TOML | Functionally equivalent at this scale |
 | State storage architecture | Single file vs distributed files | Single file is simpler; distributed (per-branch, per-operation) may scale better |
-| Path/branch encoding algorithm | Must be deterministic and best-effort collision-resistant | Both main worktree paths and branch names use the same encoding |
+| Path/branch encoding algorithm | Resolved | Main worktree paths use SHA-256 hash (first 8 hex chars); worktree directories use random 8-hex-char IDs |
 | Shell integration for `wkm wp` | Shell function wrapper vs subshell | `cd $(wkm wp branch)` works but a shell function could be smoother |
 | Default naming strategy | `timestamp` (default) vs `random` | Timestamp is sortable; random is more memorable |
 | Operation ID generation | UUID, counter, timestamp-based | Must be unique within the state file lifetime |

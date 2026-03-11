@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
+use crate::encoding;
 use crate::error::WkmError;
 use crate::git::types::RebaseResult;
 use crate::git::{GitBranches, GitDiscovery, GitMutations, GitStash, GitStatus, GitWorktrees};
@@ -133,9 +134,10 @@ pub fn sync(
         } else {
             // Create temp worktree for rebase
             let temp_branch = format!("_wkm/rebase/{branch}");
+            let temp_id = encoding::generate_worktree_id();
             let temp_path = ctx
                 .storage_dir
-                .join(format!("_rebase_{branch}"))
+                .join(format!("_rebase_{temp_id}"))
                 .join(&ctx.repo_name);
 
             if !git.branch_exists(&temp_branch)? {
@@ -535,7 +537,6 @@ mod tests {
             &git,
             &CreateOptions {
                 branch: "feature".to_string(),
-                name: None,
                 base: None,
                 description: None,
             },
@@ -564,7 +565,6 @@ mod tests {
             &git,
             &CreateOptions {
                 branch: "feature".to_string(),
-                name: None,
                 base: None,
                 description: None,
             },

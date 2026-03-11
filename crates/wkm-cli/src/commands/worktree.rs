@@ -24,9 +24,6 @@ pub enum WorktreeCommands {
 pub struct CreateArgs {
     /// Branch name
     pub branch: String,
-    /// Explicit directory name
-    #[arg(long)]
-    pub name: Option<String>,
     /// Base branch to branch from
     #[arg(short, long)]
     pub base: Option<String>,
@@ -56,7 +53,6 @@ pub fn run(args: &WorktreeArgs) -> anyhow::Result<()> {
                 &git,
                 &worktree::CreateOptions {
                     branch: create_args.branch.clone(),
-                    name: create_args.name.clone(),
                     base: create_args.base.clone(),
                     description: create_args.description.clone(),
                 },

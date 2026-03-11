@@ -12,8 +12,6 @@ use crate::state::types::BranchEntry;
 pub struct CreateOptions {
     /// Branch name to create.
     pub branch: String,
-    /// Explicit directory name (overrides auto-generated name).
-    pub name: Option<String>,
     /// Base branch to branch from (defaults to current branch).
     pub base: Option<String>,
     /// Description for the branch.
@@ -49,44 +47,18 @@ pub fn create(
         .or_else(|| git.current_branch(&ctx.main_worktree).ok().flatten())
         .unwrap_or_else(|| wkm_state.config.base_branch.clone());
 
-    // Determine directory name
-    let dir_name = if let Some(ref name) = opts.name {
-        name.clone()
-    } else {
-        let mut generated = encoding::encode_branch_name(&opts.branch);
-
-        // Apply prefix if configured
-        if let Some(ref prefix) = wkm_state.config.prefix {
-            generated = format!("{prefix}-{generated}");
-        }
-
-        // Apply max length if configured
-        if let Some(max_len) = wkm_state.config.max_branch_length
-            && generated.len() > max_len
-        {
-            generated.truncate(max_len);
-        }
-
-        generated
-    };
+    // Generate opaque directory name (bounded retry on collision)
+    let dir_name = (0..100)
+        .find_map(|_| {
+            let id = encoding::generate_worktree_id();
+            let candidate = ctx.storage_dir.join(&id).join(&ctx.repo_name);
+            if !candidate.exists() { Some(id) } else { None }
+        })
+        .ok_or_else(|| {
+            WkmError::Other("worktree ID collision: exhausted 100 attempts".to_string())
+        })?;
 
     let worktree_path = ctx.storage_dir.join(&dir_name).join(&ctx.repo_name);
-
-    // Check for directory collision
-    if worktree_path.exists() {
-        // Check if a different branch uses this directory
-        let existing_branch = wkm_state
-            .branches
-            .iter()
-            .find(|(_, e)| e.worktree_path.as_ref() == Some(&worktree_path))
-            .map(|(name, _)| name.clone());
-
-        if let Some(ref existing) = existing_branch
-            && existing != &opts.branch
-        {
-            return Err(WkmError::DirectoryCollision(opts.branch.clone()));
-        }
-    }
 
     let mut created_branch = false;
 
@@ -253,7 +225,6 @@ mod tests {
             &git,
             &CreateOptions {
                 branch: "feature".to_string(),
-                name: None,
                 base: None,
                 description: None,
             },
@@ -282,7 +253,6 @@ mod tests {
             &git,
             &CreateOptions {
                 branch: "existing".to_string(),
-                name: None,
                 base: None,
                 description: None,
             },
@@ -303,7 +273,6 @@ mod tests {
             &git,
             &CreateOptions {
                 branch: "feature".to_string(),
-                name: None,
                 base: None,
                 description: None,
             },
@@ -316,7 +285,6 @@ mod tests {
             &git,
             &CreateOptions {
                 branch: "feature".to_string(),
-                name: Some("other-name".to_string()),
                 base: None,
                 description: None,
             },
@@ -335,7 +303,6 @@ mod tests {
             &git,
             &CreateOptions {
                 branch: "feature".to_string(),
-                name: None,
                 base: Some("develop".to_string()),
                 description: None,
             },
@@ -359,7 +326,6 @@ mod tests {
             &git,
             &CreateOptions {
                 branch: "feature".to_string(),
-                name: None,
                 base: None,
                 description: None,
             },
@@ -402,7 +368,6 @@ mod tests {
             &git,
             &CreateOptions {
                 branch: "feature".to_string(),
-                name: None,
                 base: None,
                 description: None,
             },
@@ -432,34 +397,58 @@ mod tests {
     }
 
     #[test]
-    fn worktree_create_collision() {
+    fn worktree_create_unique_dirs() {
         let (_repo, ctx, git) = setup();
 
-        // Create first worktree
-        create(
+        let r1 = create(
             &ctx,
             &git,
             &CreateOptions {
-                branch: "feature".to_string(),
-                name: Some("shared-name".to_string()),
+                branch: "feature-a".to_string(),
                 base: None,
                 description: None,
             },
         )
         .unwrap();
 
-        // Try a different branch with the same name
+        let r2 = create(
+            &ctx,
+            &git,
+            &CreateOptions {
+                branch: "feature-b".to_string(),
+                base: None,
+                description: None,
+            },
+        )
+        .unwrap();
+
+        // Different branches get different directory IDs
+        assert_ne!(r1.worktree_path, r2.worktree_path);
+    }
+
+    #[test]
+    fn worktree_dir_is_8_hex() {
+        let (_repo, ctx, git) = setup();
+
         let result = create(
             &ctx,
             &git,
             &CreateOptions {
-                branch: "other-feature".to_string(),
-                name: Some("shared-name".to_string()),
+                branch: "feature".to_string(),
                 base: None,
                 description: None,
             },
-        );
+        )
+        .unwrap();
 
-        assert!(matches!(result, Err(WkmError::DirectoryCollision(_))));
+        // The worktree path should be <storage_dir>/<8-hex>/<repo_name>
+        let parent = result.worktree_path.parent().unwrap();
+        let dir_name = parent.file_name().unwrap().to_str().unwrap();
+        assert_eq!(dir_name.len(), 8);
+        assert!(
+            dir_name
+                .chars()
+                .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+        );
     }
 }

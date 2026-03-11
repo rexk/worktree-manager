@@ -198,7 +198,6 @@ mod tests {
             &git,
             &CreateOptions {
                 branch: "feat".to_string(),
-                name: None,
                 base: None,
                 description: None,
             },
