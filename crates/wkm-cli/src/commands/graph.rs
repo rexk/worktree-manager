@@ -5,7 +5,7 @@ use wkm_core::ops::visibility;
 use wkm_core::repo::RepoContext;
 use wkm_core::state;
 
-use crate::ui::{tilde_path, Styles};
+use crate::ui::{Styles, tilde_path};
 
 #[derive(Args)]
 pub struct GraphArgs {
@@ -31,9 +31,8 @@ pub fn run(args: &GraphArgs) -> anyhow::Result<()> {
             .ok()
             .flatten();
 
-        let wkm_state = state::read_state(&ctx.state_path)?.ok_or_else(|| {
-            anyhow::anyhow!("not initialized — run `wkm init` first")
-        })?;
+        let wkm_state = state::read_state(&ctx.state_path)?
+            .ok_or_else(|| anyhow::anyhow!("not initialized — run `wkm init` first"))?;
         let base_branch = wkm_state.config.base_branch.clone();
         let main_wt = ctx.main_worktree.clone();
 

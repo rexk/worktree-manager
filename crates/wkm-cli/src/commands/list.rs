@@ -3,7 +3,7 @@ use wkm_core::git::cli::CliGit;
 use wkm_core::ops::list;
 use wkm_core::repo::RepoContext;
 
-use crate::ui::{tilde_path, Styles};
+use crate::ui::{Styles, tilde_path};
 
 #[derive(Args)]
 pub struct ListArgs {

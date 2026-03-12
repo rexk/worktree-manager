@@ -59,10 +59,7 @@ pub fn run(args: &ConfigArgs) -> anyhow::Result<()> {
             println!("base_branch={}", cfg.base_branch);
             println!("merge_strategy={:?}", cfg.merge_strategy);
             println!("naming_strategy={:?}", cfg.naming_strategy);
-            println!(
-                "prefix={}",
-                cfg.prefix.as_deref().unwrap_or("(unset)")
-            );
+            println!("prefix={}", cfg.prefix.as_deref().unwrap_or("(unset)"));
             println!(
                 "max_branch_length={}",
                 cfg.max_branch_length
