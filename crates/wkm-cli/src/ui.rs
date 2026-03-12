@@ -1,4 +1,5 @@
 use std::io::IsTerminal;
+use std::path::Path;
 
 use console::Style;
 
@@ -34,5 +35,18 @@ impl Styles {
             in_progress: Style::new().yellow(),
             tree_line: Style::new().dim(),
         }
+    }
+}
+
+/// Replace `$HOME` prefix with `~` for display.
+pub fn tilde_path(path: &Path) -> String {
+    if let Ok(home) = std::env::var("HOME") {
+        let s = path.display().to_string();
+        if let Some(rest) = s.strip_prefix(&home) {
+            return format!("~{rest}");
+        }
+        s
+    } else {
+        path.display().to_string()
     }
 }

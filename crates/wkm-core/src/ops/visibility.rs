@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use serde::Serialize;
 
 use crate::error::WkmError;
@@ -11,6 +13,7 @@ pub struct GraphNode {
     pub name: String,
     pub parent: Option<String>,
     pub children: Vec<String>,
+    pub worktree_path: Option<PathBuf>,
 }
 
 /// Get the branch graph as structured data (for --json).
@@ -27,6 +30,7 @@ pub fn graph_data(ctx: &RepoContext) -> Result<Vec<GraphNode>, WkmError> {
         name: root.clone(),
         parent: None,
         children: children_map.get(root).cloned().unwrap_or_default(),
+        worktree_path: Some(ctx.main_worktree.clone()),
     });
 
     // All tracked branches
@@ -35,6 +39,7 @@ pub fn graph_data(ctx: &RepoContext) -> Result<Vec<GraphNode>, WkmError> {
             name: name.clone(),
             parent: entry.parent.clone(),
             children: children_map.get(name).cloned().unwrap_or_default(),
+            worktree_path: entry.worktree_path.clone(),
         });
     }
 

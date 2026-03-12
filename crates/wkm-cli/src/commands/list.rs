@@ -3,13 +3,17 @@ use wkm_core::git::cli::CliGit;
 use wkm_core::ops::list;
 use wkm_core::repo::RepoContext;
 
-use crate::ui::Styles;
+use crate::ui::{tilde_path, Styles};
 
 #[derive(Args)]
 pub struct ListArgs {
     /// Output as JSON
     #[arg(long)]
     pub json: bool,
+
+    /// Show full worktree paths instead of compact (wt) indicator
+    #[arg(long, short)]
+    pub long: bool,
 }
 
 pub fn run(args: &ListArgs) -> anyhow::Result<()> {
@@ -36,11 +40,19 @@ pub fn run(args: &ListArgs) -> anyhow::Result<()> {
             .as_deref()
             .map(|p| format!(" {}", s.parent.apply_to(format!("(parent: {p})"))))
             .unwrap_or_default();
-        let wt = entry
-            .worktree_path
-            .as_ref()
-            .map(|p| format!(" [{}]", p.display()))
-            .unwrap_or_default();
+        let wt = if args.long {
+            entry
+                .worktree_path
+                .as_ref()
+                .map(|p| format!(" ({})", tilde_path(p)))
+                .unwrap_or_default()
+        } else {
+            entry
+                .worktree_path
+                .as_ref()
+                .map(|_| " (wt)".to_string())
+                .unwrap_or_default()
+        };
         let stash = if entry.has_stash {
             format!(" {}", s.stash.apply_to("[stash]"))
         } else {
