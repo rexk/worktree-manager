@@ -35,6 +35,8 @@ enum Commands {
     /// Switch to a branch
     #[command(visible_alias = "co")]
     Checkout(commands::checkout::CheckoutArgs),
+    /// Fetch and fast-forward the base branch from origin
+    Fetch(commands::fetch::FetchArgs),
     /// Sync branches by rebasing onto parents
     Sync(commands::sync::SyncArgs),
     /// Merge a child branch into its parent
@@ -69,6 +71,7 @@ fn main() -> anyhow::Result<()> {
         Commands::Worktree(args) => commands::worktree::run(args),
         Commands::Adopt(args) => commands::adopt::run(args),
         Commands::Checkout(args) => commands::checkout::run(args),
+        Commands::Fetch(args) => commands::fetch::run(args),
         Commands::Sync(args) => commands::sync::run(args),
         Commands::Merge(args) => commands::merge::run(args),
         Commands::Drop(args) => commands::drop_branch::run(args),

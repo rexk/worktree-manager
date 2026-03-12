@@ -3,6 +3,7 @@ pub mod cd;
 pub mod checkout;
 pub mod config;
 pub mod drop_branch;
+pub mod fetch;
 pub mod graph;
 pub mod init;
 pub mod list;

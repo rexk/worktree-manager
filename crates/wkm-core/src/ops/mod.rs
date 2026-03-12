@@ -1,6 +1,7 @@
 pub mod adopt;
 pub mod checkout;
 pub mod drop_branch;
+pub mod fetch;
 pub mod init;
 pub mod list;
 pub mod merge;

@@ -49,13 +49,9 @@ pub fn sync(
         return Err(WkmError::DirtyWorktree(dirty.join(", ")));
     }
 
-    // Try to fast-forward the base branch
+    // Try to fast-forward the base branch from remote
     let base = wkm_state.config.base_branch.clone();
-    if let Ok(Some(_upstream)) = git.remote_tracking_branch(&base) {
-        let _ = git.fetch("origin");
-        let main_wt = git.main_worktree_path()?;
-        let _ = git.merge_ff_only(&main_wt, &format!("origin/{base}"));
-    }
+    let _ = super::fetch::fetch_and_ff(ctx, git);
 
     // Build topo order: parents before children
     let topo = graph::topo_sort(&base, &wkm_state.branches);
