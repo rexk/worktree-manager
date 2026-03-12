@@ -32,6 +32,24 @@ wkm merge feature-auth
 
 ## Installation
 
+### Prebuilt binaries (Linux / macOS)
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/rexk/worktree-manager/main/install.sh | sh
+```
+
+Options:
+
+```bash
+# Install a specific version
+curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/rexk/worktree-manager/main/install.sh | sh -s -- --tag v0.1.0
+
+# Install to a custom directory
+curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/rexk/worktree-manager/main/install.sh | sh -s -- --to ~/bin
+```
+
+### From source
+
 Requires **Rust 1.85+** and **git** on your PATH.
 
 ```bash
