@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use crate::encoding;
 use crate::error::WkmError;
 use crate::repo::RepoContext;
 use crate::state;
@@ -38,8 +39,7 @@ pub fn init(ctx: &RepoContext, opts: &InitOptions) -> Result<WkmState, WkmError>
     let storage_dir = resolve_storage_dir(ctx, opts)?;
 
     let mut config = WkmConfig::new(&opts.base_branch);
-    config.storage_dir = opts.storage_dir.clone();
-    config.resolved_storage_dir = Some(storage_dir.clone());
+    config.storage_dir = Some(storage_dir.clone());
     let new_state = WkmState::new(config);
 
     // Create storage directory
@@ -53,12 +53,12 @@ pub fn init(ctx: &RepoContext, opts: &InitOptions) -> Result<WkmState, WkmError>
 
 /// Resolve the storage directory, handling hash collisions.
 ///
-/// If the user provided an explicit `storage_dir`, use that directly.
-/// Otherwise, compute a hash-based candidate and check for collisions.
+/// If the user provided an explicit `storage_dir`, compute `user_base/hash` directly.
+/// Otherwise, use `ctx.storage_dir` (computed from env/defaults) and check for collisions.
 fn resolve_storage_dir(ctx: &RepoContext, opts: &InitOptions) -> Result<PathBuf, WkmError> {
-    if opts.storage_dir.is_some() {
-        // User override — use the ctx.storage_dir which already incorporates it
-        return Ok(ctx.storage_dir.clone());
+    if let Some(ref user_base) = opts.storage_dir {
+        let hash = encoding::hash_path(ctx.main_worktree.to_string_lossy().as_ref());
+        return Ok(user_base.join(hash));
     }
 
     let candidate = ctx.storage_dir.clone();
@@ -178,11 +178,11 @@ mod tests {
     }
 
     #[test]
-    fn init_persists_resolved_storage_dir() {
+    fn init_persists_storage_dir() {
         let repo = TestRepo::new();
         let (ctx, state) = init_repo(&repo);
-        assert!(state.config.resolved_storage_dir.is_some());
-        let resolved = state.config.resolved_storage_dir.unwrap();
+        assert!(state.config.storage_dir.is_some());
+        let resolved = state.config.storage_dir.unwrap();
         assert_eq!(resolved, ctx.storage_dir);
 
         // Re-resolve from state — should use persisted path
@@ -211,10 +211,32 @@ mod tests {
         std::fs::write(ctx.storage_dir.join("marker"), "other repo").unwrap();
 
         let state = init(&ctx, &InitOptions::default()).unwrap();
-        let resolved = state.config.resolved_storage_dir.unwrap();
+        let resolved = state.config.storage_dir.unwrap();
 
         // Should have a _1 suffix
         let leaf = resolved.file_name().unwrap().to_string_lossy();
         assert!(leaf.ends_with("_1"), "expected _1 suffix, got: {leaf}");
+    }
+
+    #[test]
+    fn init_storage_dir_override_works() {
+        let repo = TestRepo::new();
+        let custom_dir = tempfile::tempdir().unwrap();
+        let ctx = RepoContext::from_path(repo.path()).unwrap();
+        let opts = InitOptions {
+            base_branch: "main".to_string(),
+            storage_dir: Some(custom_dir.path().to_path_buf()),
+        };
+        let state = init(&ctx, &opts).unwrap();
+
+        let resolved = state.config.storage_dir.unwrap();
+        // Should be under the custom dir, not the default
+        assert!(resolved.starts_with(custom_dir.path()));
+        // Should have the hash suffix
+        let leaf = resolved.file_name().unwrap().to_string_lossy();
+        assert_eq!(leaf.len(), 8);
+        assert!(leaf.chars().all(|c| c.is_ascii_hexdigit()));
+        // Directory should exist
+        assert!(resolved.exists());
     }
 }

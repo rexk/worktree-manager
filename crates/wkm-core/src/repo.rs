@@ -23,15 +23,10 @@ pub struct RepoContext {
 }
 
 /// Resolve the base data directory for wkm storage using tiered resolution:
-/// 1. Per-repo config `storage_dir` (returned directly, not under `wkm/`)
-/// 2. `WKM_DATA_DIR` env var (returned directly, not under `wkm/`)
-/// 3. `XDG_DATA_HOME` env var → `$XDG_DATA_HOME/wkm/`
-/// 4. Fallback: `~/.local/share/wkm/`
-fn resolve_base_data_dir(config_storage_dir: Option<&Path>) -> Result<PathBuf, WkmError> {
-    if let Some(dir) = config_storage_dir {
-        return Ok(dir.to_path_buf());
-    }
-
+/// 1. `WKM_DATA_DIR` env var (returned directly, not under `wkm/`)
+/// 2. `XDG_DATA_HOME` env var → `$XDG_DATA_HOME/wkm/`
+/// 3. Fallback: `~/.local/share/wkm/`
+fn resolve_base_data_dir() -> Result<PathBuf, WkmError> {
     if let Ok(dir) = std::env::var("WKM_DATA_DIR") {
         return Ok(PathBuf::from(dir));
     }
@@ -70,26 +65,21 @@ impl RepoContext {
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "repo".to_string());
 
-        // Load existing state to check for resolved or per-repo config storage_dir
+        // Load existing state to check for persisted storage_dir
         let existing_state = state::read_state(&state_path)?;
 
         let storage_dir = if let Some(ref state) = existing_state {
-            if let Some(ref resolved) = state.config.resolved_storage_dir {
-                // Already resolved — use persisted path directly
-                resolved.clone()
-            } else if state.config.storage_dir.is_some() {
-                // Per-repo override (legacy path)
-                let base_dir = resolve_base_data_dir(state.config.storage_dir.as_deref())?;
-                let hash = encoding::hash_path(main_worktree.to_string_lossy().as_ref());
-                base_dir.join(hash)
+            if let Some(ref dir) = state.config.storage_dir {
+                // Persisted fully-resolved path — use directly
+                dir.clone()
             } else {
-                let base_dir = resolve_base_data_dir(None)?;
+                let base_dir = resolve_base_data_dir()?;
                 let hash = encoding::hash_path(main_worktree.to_string_lossy().as_ref());
                 base_dir.join(hash)
             }
         } else {
             // No state yet (pre-init) — compute default
-            let base_dir = resolve_base_data_dir(None)?;
+            let base_dir = resolve_base_data_dir()?;
             let hash = encoding::hash_path(main_worktree.to_string_lossy().as_ref());
             base_dir.join(hash)
         };

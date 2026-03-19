@@ -11,8 +11,9 @@ use crate::error::WkmError;
 pub fn read_state(path: &Path) -> Result<Option<WkmState>, WkmError> {
     match std::fs::read_to_string(path) {
         Ok(contents) => {
-            let state: WkmState =
+            let mut state: WkmState =
                 toml::from_str(&contents).map_err(|e| WkmError::State(e.to_string()))?;
+            state.config.normalize_storage_dir();
             Ok(Some(state))
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),

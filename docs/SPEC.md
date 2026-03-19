@@ -69,7 +69,7 @@ Worktree storage path is derived from the main worktree's local filesystem path 
 
 The `<base-dir>` is resolved using tiered priority:
 
-1. **Per-repo config** (`wkm.toml` → `config.storage_dir`) — absolute path used as the base directory.
+1. **Per-repo config** (`wkm.toml` → `config.storage_dir`) — fully resolved absolute path used directly (not as a base — the hash is already included).
 2. **`WKM_DATA_DIR` env var** — if set, used as the base directory.
 3. **`XDG_DATA_HOME` env var** — if set, `$XDG_DATA_HOME/wkm/` is used.
 4. **Fallback: `~/.local/share/wkm/`** — always, on all platforms.
@@ -264,7 +264,7 @@ Mutating commands (`checkout`, `worktree create`, `worktree remove`, `sync`, `me
 | Command | Purpose |
 |---------|---------|
 | `wkm config get <key>` | Get a config value. |
-| `wkm config set <key> <value>` | Set a config value. Keys: `base_branch`, `merge_strategy`, `naming_strategy`, `prefix`, `max_branch_length`. |
+| `wkm config set <key> <value>` | Set a config value. Keys: `base_branch`, `merge_strategy`, `naming_strategy`, `prefix`, `max_branch_length`, `storage_dir`. |
 | `wkm config list` | List all config values for the current repo. |
 | `wkm repair` | Reconcile wkm state with actual filesystem and git state. Runs `git worktree repair` and `git worktree prune` to fix git-level issues. Removes stale state entries for deleted worktrees and branches that no longer exist in the git repository. Cleans up orphaned `_wkm/*` branches. Detects and warns about manually created `_wkm` branches that conflict with the namespace. Cleans up stale `wkm:`-prefixed stash entries (scans `git stash list`, drops entries whose hashes are no longer referenced by any active WAL entry **OR** branch metadata in state, and have been created more than 24 hours ago). Recovers or rolls back incomplete operations using the write-ahead log. |
 

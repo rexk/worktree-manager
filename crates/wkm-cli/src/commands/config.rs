@@ -12,7 +12,7 @@ pub struct ConfigArgs {
 pub enum ConfigCommands {
     /// Get a config value
     Get {
-        /// Config key (base_branch, merge_strategy, naming_strategy, prefix, max_branch_length)
+        /// Config key (base_branch, merge_strategy, naming_strategy, prefix, max_branch_length, storage_dir)
         key: String,
     },
     /// Set a config value
@@ -48,6 +48,12 @@ pub fn run(args: &ConfigArgs) -> anyhow::Result<()> {
                     .max_branch_length
                     .map(|n| n.to_string())
                     .unwrap_or_else(|| "(unset)".to_string()),
+                "storage_dir" => wkm_state
+                    .config
+                    .storage_dir
+                    .as_ref()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|| "(unset)".to_string()),
                 _ => anyhow::bail!("unknown config key: {key}"),
             };
             println!("{value}");
@@ -64,6 +70,13 @@ pub fn run(args: &ConfigArgs) -> anyhow::Result<()> {
                 "max_branch_length={}",
                 cfg.max_branch_length
                     .map(|n| n.to_string())
+                    .unwrap_or_else(|| "(unset)".to_string())
+            );
+            println!(
+                "storage_dir={}",
+                cfg.storage_dir
+                    .as_ref()
+                    .map(|p| p.display().to_string())
                     .unwrap_or_else(|| "(unset)".to_string())
             );
         }
@@ -107,6 +120,22 @@ pub fn run(args: &ConfigArgs) -> anyhow::Result<()> {
                                 anyhow::anyhow!("invalid max_branch_length: {value}")
                             })?)
                         };
+                }
+                "storage_dir" => {
+                    if value == "unset" || value.is_empty() {
+                        wkm_state.config.storage_dir = None;
+                        println!(
+                            "Note: storage_dir unset. New worktrees will use the default location."
+                        );
+                    } else {
+                        let path = std::path::PathBuf::from(value.as_str());
+                        if !path.is_absolute() {
+                            anyhow::bail!("storage_dir must be an absolute path");
+                        }
+                        std::fs::create_dir_all(&path)?;
+                        wkm_state.config.storage_dir = Some(path);
+                        println!("Note: existing worktrees keep their current paths.");
+                    }
                 }
                 _ => anyhow::bail!("unknown config key: {key}"),
             }

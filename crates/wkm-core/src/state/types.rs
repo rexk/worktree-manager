@@ -37,10 +37,13 @@ pub struct WkmConfig {
     pub prefix: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_branch_length: Option<usize>,
+    /// Fully resolved storage directory path (e.g. `/home/user/.local/share/wkm/a1b2c3d4`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub storage_dir: Option<PathBuf>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub resolved_storage_dir: Option<PathBuf>,
+    /// Legacy field — read from old TOML files during deserialization, never written.
+    /// Migrated into `storage_dir` by `normalize_storage_dir()`.
+    #[serde(skip_serializing, default)]
+    resolved_storage_dir: Option<PathBuf>,
 }
 
 impl WkmConfig {
@@ -53,6 +56,16 @@ impl WkmConfig {
             max_branch_length: None,
             storage_dir: None,
             resolved_storage_dir: None,
+        }
+    }
+
+    /// Migrate legacy `resolved_storage_dir` into `storage_dir`.
+    /// Old state files stored the user-provided base in `storage_dir` and the
+    /// fully resolved path in `resolved_storage_dir`. After normalization,
+    /// `storage_dir` holds the fully resolved path and the legacy field is cleared.
+    pub(crate) fn normalize_storage_dir(&mut self) {
+        if let Some(resolved) = self.resolved_storage_dir.take() {
+            self.storage_dir = Some(resolved);
         }
     }
 }
@@ -235,5 +248,45 @@ mod tests {
             serde_json::to_string(&MergeStrategy::Squash).unwrap(),
             "\"squash\""
         );
+    }
+
+    #[test]
+    fn normalize_storage_dir_migrates_legacy_field() {
+        // Simulate an old TOML file with both fields
+        let toml_str = r#"
+            base_branch = "main"
+            storage_dir = "/custom/path"
+            resolved_storage_dir = "/custom/path/a1b2c3d4"
+        "#;
+        let mut config: WkmConfig = toml::from_str(toml_str).unwrap();
+
+        // Before normalization, storage_dir has the old user-provided value
+        assert_eq!(config.storage_dir, Some(PathBuf::from("/custom/path")));
+        assert_eq!(
+            config.resolved_storage_dir,
+            Some(PathBuf::from("/custom/path/a1b2c3d4"))
+        );
+
+        config.normalize_storage_dir();
+
+        // After normalization, storage_dir holds the fully resolved path
+        assert_eq!(
+            config.storage_dir,
+            Some(PathBuf::from("/custom/path/a1b2c3d4"))
+        );
+        assert!(config.resolved_storage_dir.is_none());
+
+        // Re-serialization should NOT include resolved_storage_dir
+        let re_serialized = toml::to_string_pretty(&config).unwrap();
+        assert!(!re_serialized.contains("resolved_storage_dir"));
+        assert!(re_serialized.contains("storage_dir"));
+    }
+
+    #[test]
+    fn normalize_storage_dir_noop_when_no_legacy() {
+        let mut config = WkmConfig::new("main");
+        config.storage_dir = Some(PathBuf::from("/already/resolved"));
+        config.normalize_storage_dir();
+        assert_eq!(config.storage_dir, Some(PathBuf::from("/already/resolved")));
     }
 }
