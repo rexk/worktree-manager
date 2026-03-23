@@ -138,10 +138,7 @@ pub fn repair(
 /// Find all branches starting with `_wkm/`.
 fn find_wkm_branches(git: &impl GitBranches) -> Result<Vec<String>, WkmError> {
     let all = git.branch_list()?;
-    Ok(all
-        .into_iter()
-        .filter(|b| b.starts_with("_wkm/"))
-        .collect())
+    Ok(all.into_iter().filter(|b| b.starts_with("_wkm/")).collect())
 }
 
 #[cfg(test)]
