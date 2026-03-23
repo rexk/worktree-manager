@@ -16,6 +16,9 @@ pub fn run(_args: &RepairArgs) -> anyhow::Result<()> {
     if result.stale_lock_removed {
         println!("Removed stale lockfile.");
     }
+    if result.git_worktree_repaired {
+        println!("Ran git worktree repair and prune.");
+    }
     if result.wal_cleared {
         println!("Cleared incomplete operation (WAL).");
     }
@@ -28,12 +31,17 @@ pub fn run(_args: &RepairArgs) -> anyhow::Result<()> {
     for branch in &result.orphan_branches_deleted {
         println!("Deleted orphaned branch '{branch}'.");
     }
+    for path in &result.pending_removals_cleaned {
+        println!("Cleaned up pending removal: '{path}'.");
+    }
 
     let any_work = result.stale_lock_removed
+        || result.git_worktree_repaired
         || result.wal_cleared
         || !result.branches_removed.is_empty()
         || !result.worktree_paths_cleared.is_empty()
-        || !result.orphan_branches_deleted.is_empty();
+        || !result.orphan_branches_deleted.is_empty()
+        || !result.pending_removals_cleaned.is_empty();
 
     if !any_work {
         println!("Nothing to repair.");

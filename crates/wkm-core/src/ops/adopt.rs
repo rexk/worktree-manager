@@ -35,6 +35,11 @@ pub fn adopt(
         .or_else(|| git.current_branch(&ctx.main_worktree).ok().flatten())
         .unwrap_or_else(|| wkm_state.config.base_branch.clone());
 
+    // Validate the resolved parent branch exists
+    if !git.branch_exists(&parent_branch)? {
+        return Err(WkmError::BranchNotFound(parent_branch));
+    }
+
     // Fetch worktree list once
     let worktrees = git.worktree_list()?;
 
@@ -260,6 +265,23 @@ mod tests {
 
         assert_eq!(result.adopted, vec!["untracked"]);
         assert_eq!(result.skipped, vec!["tracked"]);
+    }
+
+    #[test]
+    fn adopt_invalid_parent_errors() {
+        let (repo, ctx, git) = setup();
+        repo.create_branch("feature");
+        let result = adopt(
+            &ctx,
+            &git,
+            &["feature".to_string()],
+            Some("nonexistent-parent"),
+            false,
+        );
+        assert!(
+            matches!(result, Err(WkmError::BranchNotFound(_))),
+            "adopt should fail when explicit parent branch doesn't exist"
+        );
     }
 
     #[test]
