@@ -9,6 +9,7 @@ use crate::state::lock::WkmLock;
 pub struct RepairResult {
     pub wal_cleared: bool,
     pub stale_lock_removed: bool,
+    pub git_worktree_repaired: bool,
     pub branches_removed: Vec<String>,
     pub worktree_paths_cleared: Vec<String>,
     pub orphan_branches_deleted: Vec<String>,
@@ -18,11 +19,12 @@ pub struct RepairResult {
 /// Run repair: enforce all invariants.
 ///
 /// 1. Remove stale lockfile (dead PID)
-/// 2. Clear WAL (rollback incomplete ops)
-/// 3. Remove state entries for branches that no longer exist in git
-/// 4. Clear worktree_path for entries where the path no longer exists on disk
-/// 5. Delete orphaned `_wkm/*` branches not referenced by state or WAL
-/// 6. (Stale stash cleanup omitted — git gc handles this)
+/// 2. Run `git worktree repair` and `git worktree prune`
+/// 3. Clear WAL (rollback incomplete ops)
+/// 4. Remove state entries for branches that no longer exist in git
+/// 5. Clear worktree_path for entries where the path no longer exists on disk
+/// 6. Delete orphaned `_wkm/*` branches not referenced by state or WAL
+/// 7. Clean up pending `.wkm-removing` directories
 pub fn repair(
     ctx: &RepoContext,
     git: &(impl GitDiscovery + GitBranches + GitWorktrees + GitStatus + GitStash + GitMutations),
@@ -36,6 +38,11 @@ pub fn repair(
     }
 
     let lock = WkmLock::acquire(&ctx.lock_path)?;
+
+    // 2. Run git worktree repair and prune to fix git-level metadata
+    let repair_ok = git.worktree_repair().is_ok();
+    let prune_ok = git.worktree_prune().is_ok();
+    result.git_worktree_repaired = repair_ok || prune_ok;
 
     let mut wkm_state = match state::read_state(&ctx.state_path)? {
         Some(s) => s,
@@ -130,15 +137,11 @@ pub fn repair(
 
 /// Find all branches starting with `_wkm/`.
 fn find_wkm_branches(git: &impl GitBranches) -> Result<Vec<String>, WkmError> {
-    // We don't have a list-all-branches method, but we can check known patterns.
-    // For now, we rely on worktree_list catching most of them.
-    // A full implementation would shell out to `git branch --list '_wkm/*'`.
-    // For repair, the worktree-based check above covers the common case.
-    //
-    // Use CliGit's run method indirectly — but since we only have trait access,
-    // we'll skip this for now. The worktree-based cleanup above handles the main case.
-    let _ = git;
-    Ok(vec![])
+    let all = git.branch_list()?;
+    Ok(all
+        .into_iter()
+        .filter(|b| b.starts_with("_wkm/"))
+        .collect())
 }
 
 #[cfg(test)]
@@ -298,6 +301,28 @@ mod tests {
         let result = repair(&ctx, &git).unwrap();
         assert!(!leftover.exists());
         assert_eq!(result.pending_removals_cleaned.len(), 1);
+    }
+
+    #[test]
+    fn repair_orphan_wkm_branch_no_worktree() {
+        let (repo, ctx, git) = setup();
+
+        // Create a _wkm/ branch that has no worktree (e.g. leftover from a crash)
+        repo.create_branch("_wkm/hold/stale");
+
+        let result = repair(&ctx, &git).unwrap();
+        assert!(
+            result
+                .orphan_branches_deleted
+                .contains(&"_wkm/hold/stale".to_string()),
+            "Expected orphan _wkm branch without worktree to be cleaned up"
+        );
+
+        // Verify the branch was actually deleted
+        assert!(
+            !git.branch_exists("_wkm/hold/stale").unwrap(),
+            "Branch should be deleted after repair"
+        );
     }
 
     #[test]
