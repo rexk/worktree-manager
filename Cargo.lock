@@ -1052,6 +1052,7 @@ dependencies = [
  "dialoguer",
  "serde_json",
  "tempfile",
+ "toml",
  "wkm-core",
  "wkm-sandbox",
 ]
