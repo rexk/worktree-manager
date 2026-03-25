@@ -20,3 +20,4 @@ dialoguer = { version = "0.12", features = ["fuzzy-select"] }
 [dev-dependencies]
 wkm-sandbox = { workspace = true }
 tempfile = { workspace = true }
+toml = { workspace = true }

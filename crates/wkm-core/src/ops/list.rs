@@ -53,6 +53,9 @@ pub fn list(
 }
 
 /// Get the worktree path for a branch (for `wkm wp`).
+///
+/// Returns an error if the branch is not tracked, has no worktree assigned,
+/// or the worktree directory no longer exists on disk.
 pub fn cd_path(ctx: &RepoContext, branch: &str) -> Result<PathBuf, WkmError> {
     let wkm_state = state::read_state(&ctx.state_path)?.ok_or(WkmError::NotInitialized)?;
 
@@ -66,10 +69,16 @@ pub fn cd_path(ctx: &RepoContext, branch: &str) -> Result<PathBuf, WkmError> {
         .get(branch)
         .ok_or_else(|| WkmError::BranchNotTracked(branch.to_string()))?;
 
-    entry
+    let path = entry
         .worktree_path
         .clone()
-        .ok_or_else(|| WkmError::NoWorktree(branch.to_string()))
+        .ok_or_else(|| WkmError::NoWorktree(branch.to_string()))?;
+
+    if !path.exists() {
+        return Err(WkmError::WorktreePathMissing(branch.to_string(), path));
+    }
+
+    Ok(path)
 }
 
 #[cfg(test)]
@@ -140,12 +149,15 @@ mod tests {
     fn cd_returns_path() {
         let (repo, ctx, _git) = setup();
 
+        let wt_path = repo.path().join("feature-wt");
+        std::fs::create_dir_all(&wt_path).unwrap();
+
         let mut wkm_state = state::read_state(&ctx.state_path).unwrap().unwrap();
         wkm_state.branches.insert(
             "feature".to_string(),
             BranchEntry {
                 parent: Some("main".to_string()),
-                worktree_path: Some(repo.path().join("feature-wt")),
+                worktree_path: Some(wt_path.clone()),
                 stash_commit: None,
                 description: None,
                 created_at: "2026-01-01T00:00:00Z".to_string(),
@@ -155,7 +167,7 @@ mod tests {
         state::write_state(&ctx.state_path, &wkm_state).unwrap();
 
         let path = cd_path(&ctx, "feature").unwrap();
-        assert_eq!(path, repo.path().join("feature-wt"));
+        assert_eq!(path, wt_path);
     }
 
     #[test]
@@ -163,6 +175,81 @@ mod tests {
         let (_repo, ctx, _git) = setup();
         let path = cd_path(&ctx, "main").unwrap();
         assert_eq!(path, ctx.main_worktree);
+    }
+
+    #[test]
+    fn cd_path_missing_directory_errors() {
+        let (_repo, ctx, _git) = setup();
+
+        let mut wkm_state = state::read_state(&ctx.state_path).unwrap().unwrap();
+        wkm_state.branches.insert(
+            "feature".to_string(),
+            BranchEntry {
+                parent: Some("main".to_string()),
+                worktree_path: Some(PathBuf::from("/tmp/nonexistent-worktree-path-12345")),
+                stash_commit: None,
+                description: None,
+                created_at: "2026-01-01T00:00:00Z".to_string(),
+                previous_branch: None,
+            },
+        );
+        state::write_state(&ctx.state_path, &wkm_state).unwrap();
+
+        let result = cd_path(&ctx, "feature");
+        assert!(
+            matches!(result, Err(WkmError::WorktreePathMissing(ref b, _)) if b == "feature"),
+            "expected WorktreePathMissing, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn cd_path_with_slash_in_branch_name() {
+        let (repo, ctx, _git) = setup();
+
+        let wt_path = repo.path().join("cursor-wt");
+        std::fs::create_dir_all(&wt_path).unwrap();
+
+        let mut wkm_state = state::read_state(&ctx.state_path).unwrap().unwrap();
+        wkm_state.branches.insert(
+            "cursor/build-cache-cleanup-8644".to_string(),
+            BranchEntry {
+                parent: Some("main".to_string()),
+                worktree_path: Some(wt_path.clone()),
+                stash_commit: None,
+                description: None,
+                created_at: "2026-01-01T00:00:00Z".to_string(),
+                previous_branch: None,
+            },
+        );
+        state::write_state(&ctx.state_path, &wkm_state).unwrap();
+
+        let path = cd_path(&ctx, "cursor/build-cache-cleanup-8644").unwrap();
+        assert_eq!(path, wt_path);
+    }
+
+    #[test]
+    fn cd_path_existing_directory_succeeds() {
+        let (repo, ctx, _git) = setup();
+
+        let wt_path = repo.path().join("feature-wt");
+        std::fs::create_dir_all(&wt_path).unwrap();
+
+        let mut wkm_state = state::read_state(&ctx.state_path).unwrap().unwrap();
+        wkm_state.branches.insert(
+            "feature".to_string(),
+            BranchEntry {
+                parent: Some("main".to_string()),
+                worktree_path: Some(wt_path.clone()),
+                stash_commit: None,
+                description: None,
+                created_at: "2026-01-01T00:00:00Z".to_string(),
+                previous_branch: None,
+            },
+        );
+        state::write_state(&ctx.state_path, &wkm_state).unwrap();
+
+        let path = cd_path(&ctx, "feature").unwrap();
+        assert_eq!(path, wt_path);
     }
 
     #[test]

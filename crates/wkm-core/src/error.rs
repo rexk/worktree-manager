@@ -44,6 +44,9 @@ pub enum WkmError {
     #[error("no worktree for branch '{0}'. Use `wkm worktree create` or `wkm checkout`")]
     NoWorktree(String),
 
+    #[error("worktree directory for branch '{0}' no longer exists at {1}. Run `wkm repair` to fix")]
+    WorktreePathMissing(String, PathBuf),
+
     #[error("another wkm operation is in progress (PID {0})")]
     LockHeld(u32),
 
