@@ -41,6 +41,8 @@ enum Commands {
     Sync(commands::sync::SyncArgs),
     /// Merge a child branch into its parent
     Merge(commands::merge::MergeArgs),
+    /// Change the parent of a tracked branch
+    SetParent(commands::set_parent::SetParentArgs),
     /// Drop a branch from wkm tracking
     Drop(commands::drop_branch::DropArgs),
     /// Manage stashes
@@ -74,6 +76,7 @@ fn main() -> anyhow::Result<()> {
         Commands::Fetch(args) => commands::fetch::run(args),
         Commands::Sync(args) => commands::sync::run(args),
         Commands::Merge(args) => commands::merge::run(args),
+        Commands::SetParent(args) => commands::set_parent::run(args),
         Commands::Drop(args) => commands::drop_branch::run(args),
         Commands::Stash(args) => commands::stash::run(args),
         Commands::Repair(args) => commands::repair::run(args),
