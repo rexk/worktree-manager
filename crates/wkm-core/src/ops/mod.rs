@@ -6,6 +6,7 @@ pub mod init;
 pub mod list;
 pub mod merge;
 pub mod repair;
+pub mod set_parent;
 pub mod stash;
 pub mod status;
 pub mod sync;

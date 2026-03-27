@@ -185,6 +185,7 @@ Mutating commands (`checkout`, `worktree create`, `worktree remove`, `sync`, `me
 | FR-11 | The system must support **branch adoption**: tracking an existing branch and its parent relationship without requiring a worktree. |
 | FR-12 | The system must show branch state signals: clean/dirty, ahead/behind parent, ahead/behind remote tracking branch, merge-ready/conflicted. |
 | FR-13 | The system must visualize branch relationships as an ASCII graph showing worktree locations. |
+| FR-43 | `wkm set-parent <new-parent> [<branch>]` changes the tracked parent of a branch and automatically runs a full sync to rebase the branch graph. The target branch must be tracked. The new parent must exist in git and be tracked (or be the base branch). Rejects cycles (new parent cannot be the branch itself or any of its descendants). After updating the parent metadata, triggers a full `sync` to rebase all branches onto their updated parents (cascade). If a rebase conflict occurs, the user resolves with `wkm sync --continue` or `wkm sync --abort`. Only the target branch's parent pointer changes; its children continue to point at the target branch (but are rebased onto its new position via cascade). |
 
 ### 6.3 Sync
 
@@ -249,6 +250,7 @@ Mutating commands (`checkout`, `worktree create`, `worktree remove`, `sync`, `me
 | `wkm worktree remove [<branch>]` | Remove the worktree for the given branch. Branch itself is kept (with parent relationship intact). Cleans up associated `_wkm/*` temp branches. Errors if run from inside the worktree being removed (user must navigate out first, e.g., `cd $(wkm wp main)`). If no branch specified, removes the worktree for the current directory's branch. |
 | `wkm sync [--continue / --abort]` | Fetch remote, fast-forward base branch if possible, and restack the branch graph: cascade rebase of all child branches onto their updated parents. Does NOT integrate. Requires all affected worktrees to be clean. `--continue` resumes after conflict resolution (and resumes parent operation if linked). `--abort` restores pre-sync state (and clears parent merge --all if linked). |
 | `wkm merge <branch> [--all / --yes / --abort]` | Integrate child branch into current branch (fast-forward by default). Confirmation prompt before mutations. Re-parents descendants, runs internal sync on them, cleans up merged branch/worktree/temp branches. `--all` merges all direct children sequentially (resumes automatically after descendant sync conflicts). `--yes` skips prompts. `--abort` restores pre-merge state (only before descendant sync begins). |
+| `wkm set-parent <new-parent> [<branch>]` | Change the parent of a tracked branch and sync. If `<branch>` omitted, defaults to current branch. Validates that both branches are tracked (or base branch), that the new parent exists in git, and that no cycle would be created. Updates parent metadata, then runs a full sync (cascade rebase). On conflict, user resolves with `wkm sync --continue` or `--abort`. |
 
 ### 7.2 Visibility
 
