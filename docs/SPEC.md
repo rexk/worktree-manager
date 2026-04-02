@@ -8,6 +8,8 @@
 
 Managing multiple simultaneous workstreams across AI agents and interactive development is painful with a single git repo directory. Git worktrees solve the isolation problem but have UX friction: branch uniqueness constraints, no built-in mechanism to move branches between worktrees, and no relationship tracking between branches. Existing tools (worktrunk, git-worktree-runner, worktree-cli, Graphite, git-spice, Git Town) solve parts of this but none handle the full local-first workflow: checkout → branch off to worktree → work in parallel → sync → merge → cleanup.
 
+> **Note on Jujutsu (jj):** The problems listed above are largely native git limitations. [Jujutsu](https://jj-vcs.dev/) — a Git-compatible VCS — solves most of them at the VCS layer: no branch-per-worktree locking, automatic cascade rebase, atomic operation log for crash recovery, and conflict storage in commits. **wkm is primarily a stopgap for git users who have not adopted jj.** For jj users, native jj workflows are recommended over wkm. See `docs/JJ_INTEGRATION.md` for the full analysis.
+
 ## 2. Goals
 
 - Define a practical, local-first workflow for managing multiple parallel workstreams with low context-switch cost.

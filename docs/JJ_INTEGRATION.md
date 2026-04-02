@@ -1,9 +1,61 @@
 # jj (Jujutsu) Integration — Design Notes
 
-## Status
+## Strategic Positioning
+
+**wkm is a stopgap tool for git users who have not yet adopted jj.**
+
+After thorough analysis, we've concluded that jj (Jujutsu) natively solves the
+core problems that motivated wkm's creation. Users who adopt jj should use it
+directly — wkm adds little value on top of jj's native capabilities.
+
+### What motivated wkm (from SPEC.md §1)
+
+> Managing multiple simultaneous workstreams across AI agents and interactive
+> development is painful with a single git repo directory. Git worktrees solve
+> the isolation problem but have UX friction: **branch uniqueness constraints**,
+> **no built-in mechanism to move branches between worktrees**, and **no
+> relationship tracking between branches**.
+
+### How jj solves each problem natively
+
+| wkm pain point | Git limitation | jj native solution |
+|----------------|---------------|-------------------|
+| **Branch uniqueness constraint** | A branch can only be checked out in one worktree | No "current branch" per workspace — bookmarks are just labels, not locks |
+| **Moving branches between worktrees** | Requires wkm's 5-step swap (stash, hold branch, cross-checkout, restore, WAL) | `jj edit <change>` from any workspace — no swap needed |
+| **Cascade rebase** | Complex topo-sort + temp worktrees + per-step WAL (~430 lines) | `jj rebase -b` auto-cascades to all descendants |
+| **Crash recovery** | Custom WAL + PID lock + repair | `jj op log` + `jj undo` / `jj op restore` — atomic operations |
+| **Dirty worktree blocking** | Must stash before any worktree operation | Working copy IS a commit — no dirty state concept |
+| **Conflict handling** | Blocks sync at first conflict, requires --continue/--abort | Conflicts stored in commits — can continue past them |
+| **Workspace creation** | Must create branch before worktree (`git worktree add` requires branch) | `jj workspace add` — start working, name later |
+
+### What wkm still provides that jj doesn't
+
+- **Parent-child branch relationship tracking** — jj has commit ancestry but no
+  "branch stack" concept. Tools like `jj-stack` partially fill this gap.
+- **Managed storage layout** — `~/.local/share/wkm/<hash>/<id>/<repo>/` with opaque
+  IDs so terminal prompts show repo names.
+- **Merge strategies** — ff-only, merge-commit, squash back to parent.
+- **`wkm graph`** — branch stack visualization with annotations.
+
+This remaining value is narrow. For jj users, it amounts to a thin metadata
+layer that could be a jj extension rather than a standalone tool.
+
+### Recommendation
+
+- **Git-only users**: wkm provides significant value. Continue using it.
+- **jj users**: Use jj directly. wkm adds friction, not value.
+- **Migrating from git to jj**: wkm's jj integration (Phase 1+2) can ease the
+  transition, but the end state is dropping wkm in favor of native jj workflows.
+
+---
+
+## Implementation Status
 
 Phase 1 (detection + JjCli backend) and Phase 2 (sync dual path) are implemented.
-Phases 3 (workspace management) and 4 (stash replacement) are future work.
+Further jj integration phases are **deprioritized** — the analysis above shows
+that deeper integration has diminishing returns. The effort is better spent on
+improving wkm for git-only users, or contributing stack-management features
+upstream to the jj ecosystem.
 
 ## Architecture Overview
 
@@ -66,88 +118,31 @@ Workspace → working-copy commit (changeset ID)
 The changeset ID is the stable identifier. Bookmarks (branch names) are optional.
 `jj workspace add` creates a workspace pointing at a commit — no bookmark required.
 
-### Where This Matters
+### Why we're not bridging this gap
 
-In colocated repos, the models overlap for branches that exist in git (they become
-jj bookmarks automatically). The tension appears when:
+Abstracting the identity layer to support both models would be a large refactor
+(graph, WAL, errors, every operation) for diminishing returns. If a user has
+adopted jj, they should use jj directly — not wkm with a jj backend trying to
+map jj's richer model back into wkm's branch-centric one.
 
-1. **Creating new work** — git requires branch-then-worktree. jj allows
-   workspace-first, name-later. wkm can't track nameless workspaces.
+## What wkm's Swap Operation Does (and why jj eliminates it)
 
-2. **The parent graph** — wkm stores `parent: Option<String>` where String is a
-   branch name. jj tracks commit ancestry via changeset IDs. If work has no
-   bookmark, wkm can't represent it in the graph.
+The checkout swap (`checkout.rs:155-278`) is wkm's most complex operation,
+existing solely because git locks branches to worktrees:
 
-3. **Stable identity across rebases** — jj's changeset ID survives rebases (only
-   the commit hash changes). wkm currently stores neither changeset IDs nor
-   tracks identity through rebases.
+1. Stash source worktree → WAL checkpoint
+2. Stash target worktree → WAL checkpoint
+3. Create `_wkm/hold/<branch>`, checkout hold to free target → WAL checkpoint
+4. Cross-checkout branches between worktrees → WAL checkpoint
+5. Restore stashes, delete hold branch → clear WAL
 
-4. **Worktree lifecycle** — wkm ties worktree cleanup to branch deletion. In jj,
-   forgetting a workspace doesn't delete commits.
+Five steps, four WAL checkpoints, a temporary branch, stash juggling.
 
-### Design Options
-
-**Option A: Stay branch-centric (current approach)**
-
-Keep the current model. In colocated repos, branches still exist as bookmarks.
-wkm remains a "branch manager" that uses jj for better operations.
-
-- Pro: Minimal architecture change. Works today.
-- Con: Can't track nameless jj workspaces.
-
-**Option B: Add changeset ID as secondary identifier**
-
-Extend `BranchEntry` with `changeset_id: Option<String>`. When jj is available,
-store the changeset ID alongside the branch name. Operations can use whichever
-is available.
-
-- Pro: Gradual migration path. Git users unaffected.
-- Con: Doesn't solve "nameless work" fully. Two identifiers to keep in sync.
-
-**Option C: Abstract the identity layer**
-
-Replace `BTreeMap<String, BranchEntry>` with a generalized identity:
-
-```rust
-pub enum WorkUnit {
-    Branch(String),
-    Change { id: String, bookmark: Option<String> },
-}
-```
-
-Graph edges, WAL, errors, and operations all work with `WorkUnit` instead of
-raw branch names.
-
-- Pro: First-class jj support. Supports nameless work.
-- Con: Large refactor touching graph, WAL, errors, and every operation.
-  Breaks state file format (needs migration).
-
-### Current Decision
-
-**Option A** — stay branch-centric. In colocated repos, the jj integration
-provides operational wins (cascade rebase, crash recovery, conflict handling)
-without requiring a data model change. The branch-name key works because
-colocated repos always have git branches that map to jj bookmarks.
-
-If jj adoption grows and users want "name later" workflows through wkm,
-Option B is the natural next step — it's additive and backward-compatible.
-Option C is the end state but requires a state file migration.
-
-## What jj Does Better (used today)
-
-| Operation | Git approach | jj advantage |
-|-----------|-------------|--------------|
-| Cascade rebase | Topo-sort + temp worktrees + per-step WAL | `jj rebase -b` auto-cascades |
-| Crash recovery | Custom WAL + repair | `jj op restore` atomic rollback |
-| Conflict handling | Blocks sync at first conflict | Stores conflicts in commits |
-
-## What wkm Still Provides (jj doesn't do this)
-
-- Parent-child branch relationship tracking (jj has no concept of "branch stacks")
-- Worktree lifecycle management with named storage directories
-- Merge strategies (ff-only, merge-commit, squash)
-- Branch stash tracking
-- Swap operations (move branches between worktrees)
+**In jj, this entire operation is unnecessary.** Each workspace points to a
+working-copy commit. Bookmarks are labels, not locks. `jj edit <change>` works
+from any workspace with no swap, no stash, no hold branch. The `SwapStep` WAL
+enum, the `_wkm/hold/` namespace, and the stash-during-checkout logic all exist
+to work around a git limitation that jj simply doesn't have.
 
 ## File Map
 
