@@ -2,11 +2,47 @@
 
 ## Strategic Positioning
 
-**wkm is a stopgap tool for git users who have not yet adopted jj.**
+**wkm is valuable for git users AND colocated jj+git repos where jj workspaces
+are currently broken.**
 
-After thorough analysis, we've concluded that jj (Jujutsu) natively solves the
-core problems that motivated wkm's creation. Users who adopt jj should use it
-directly — wkm adds little value on top of jj's native capabilities.
+While jj natively solves many of wkm's core problems at the VCS layer, there is
+a critical gap in jj's current workspace support that makes wkm the best option
+for multi-workspace development on colocated repos.
+
+### The Colocated Workspace Problem
+
+In a colocated jj+git repo (`.jj/` + `.git/` coexist), neither jj nor git
+provides a clean multi-workspace story today:
+
+1. **`jj workspace add`** creates secondary workspaces with `.jj/` but **no
+   `.git/`**. This means IDEs, Claude Code, GitLens, lazygit, pre-commit hooks
+   — anything expecting a git repo — **break** in secondary workspaces.
+   (Tracked as jj#4644, fix in progress but no firm timeline.)
+
+2. **Raw `git worktree add`** on a colocated repo **fails** because jj always
+   puts git in detached HEAD state, and `git worktree add` requires a
+   `-b <branch>` flag when HEAD is detached.
+
+3. **`wkm worktree create`** works because wkm **always creates the branch
+   before the worktree**. The flow is:
+   ```
+   git branch feature <start-point>     # creates branch first
+   git worktree add <path> feature      # succeeds — branch exists
+   ```
+   Secondary worktrees get a `.git` file pointing back to the main repo, so
+   all git tooling works. They don't get `.jj/`, but wkm runs jj operations
+   from `ctx.main_worktree` where `.jj/` exists.
+
+| Scenario | Works? | Git tooling? | jj available? |
+|---|---|---|---|
+| Pure git + wkm | Yes | Yes | N/A |
+| Pure jj (non-colocated) | Yes | No | Yes |
+| Colocated + `jj workspace add` | Yes | **No** (no `.git/`) | Yes |
+| Colocated + raw `git worktree add` | **No** (detached HEAD) | — | — |
+| Colocated + wkm | **Yes** | **Yes** | In main worktree only |
+
+**wkm is currently the only way to get multi-workspace development on colocated
+repos with working git tooling.**
 
 ### What motivated wkm (from SPEC.md §1)
 
@@ -16,7 +52,7 @@ directly — wkm adds little value on top of jj's native capabilities.
 > **no built-in mechanism to move branches between worktrees**, and **no
 > relationship tracking between branches**.
 
-### How jj solves each problem natively
+### How jj solves each problem natively (in theory)
 
 | wkm pain point | Git limitation | jj native solution |
 |----------------|---------------|-------------------|
@@ -28,8 +64,13 @@ directly — wkm adds little value on top of jj's native capabilities.
 | **Conflict handling** | Blocks sync at first conflict, requires --continue/--abort | Conflicts stored in commits — can continue past them |
 | **Workspace creation** | Must create branch before worktree (`git worktree add` requires branch) | `jj workspace add` — start working, name later |
 
-### What wkm still provides that jj doesn't
+However, the colocated workspace limitation (jj#4644) means jj's multi-workspace
+story is incomplete in practice. Until that's resolved, wkm provides real value
+for colocated repos.
 
+### What wkm provides beyond jj
+
+- **Working git tooling in secondary workspaces** — the colocated workspace gap
 - **Parent-child branch relationship tracking** — jj has commit ancestry but no
   "branch stack" concept. Tools like `jj-stack` partially fill this gap.
 - **Managed storage layout** — `~/.local/share/wkm/<hash>/<id>/<repo>/` with opaque
@@ -37,25 +78,24 @@ directly — wkm adds little value on top of jj's native capabilities.
 - **Merge strategies** — ff-only, merge-commit, squash back to parent.
 - **`wkm graph`** — branch stack visualization with annotations.
 
-This remaining value is narrow. For jj users, it amounts to a thin metadata
-layer that could be a jj extension rather than a standalone tool.
-
 ### Recommendation
 
 - **Git-only users**: wkm provides significant value. Continue using it.
-- **jj users**: Use jj directly. wkm adds friction, not value.
-- **Migrating from git to jj**: wkm's jj integration (Phase 1+2) can ease the
-  transition, but the end state is dropping wkm in favor of native jj workflows.
+- **Colocated jj+git users**: wkm is the best option for multi-workspace
+  development until jj#4644 lands. Use wkm for workspace management, benefit
+  from jj's cascade rebase via `sync_jj()`.
+- **Pure jj users (non-colocated)**: Use jj directly. wkm adds friction, not value.
+- **Future**: When jj#4644 lands (colocated worktree support), re-evaluate.
+  At that point wkm's value for colocated repos narrows to branch stack
+  tracking, storage layout, and merge strategies.
 
 ---
 
 ## Implementation Status
 
 Phase 1 (detection + JjCli backend) and Phase 2 (sync dual path) are implemented.
-Further jj integration phases are **deprioritized** — the analysis above shows
-that deeper integration has diminishing returns. The effort is better spent on
-improving wkm for git-only users, or contributing stack-management features
-upstream to the jj ecosystem.
+Further jj integration phases are deprioritized until the colocated workspace
+situation (jj#4644) is resolved and the value proposition clarifies.
 
 ## Architecture Overview
 
@@ -86,6 +126,21 @@ Has `jj_run_ok()` / `jj_run_in()` helpers for running jj commands and
 - `sync_git()` — Original implementation: topo-sort, temp worktrees, per-step WAL.
 - `sync_jj()` — Uses `jj rebase -b <branch> -d <parent>` for native cascade rebase.
   WAL stores `jj_op_id` for rollback via `jj op restore`.
+
+### Why wkm worktrees work on colocated repos
+
+wkm uses `git worktree add` (not `jj workspace add`) for creating secondary
+workspaces. This is intentional:
+
+- `git worktree add <path> <branch>` creates a worktree with a `.git` file
+  pointing back to the main repo's git database. Git tooling works.
+- wkm always creates the branch before calling `worktree_add`, avoiding the
+  detached HEAD problem that blocks raw `git worktree add` on colocated repos.
+- Secondary worktrees don't have `.jj/`, but wkm's `sync_jj()` runs jj
+  commands from `ctx.main_worktree` (where `.jj/` exists), so jj operations
+  still benefit from the colocated setup.
+- The `JjCli::worktree_add()` delegates to `CliGit::worktree_add()` — this is
+  correct and intentional. We want git worktrees, not jj workspaces.
 
 ## Identity Model Tension
 
@@ -121,9 +176,9 @@ The changeset ID is the stable identifier. Bookmarks (branch names) are optional
 ### Why we're not bridging this gap
 
 Abstracting the identity layer to support both models would be a large refactor
-(graph, WAL, errors, every operation) for diminishing returns. If a user has
-adopted jj, they should use jj directly — not wkm with a jj backend trying to
-map jj's richer model back into wkm's branch-centric one.
+(graph, WAL, errors, every operation) for diminishing returns. The colocated
+workspace limitation means secondary workspaces are git-only anyway, so the
+branch-centric model is the right one for wkm's worktrees.
 
 ## What wkm's Swap Operation Does (and why jj eliminates it)
 
@@ -143,6 +198,10 @@ working-copy commit. Bookmarks are labels, not locks. `jj edit <change>` works
 from any workspace with no swap, no stash, no hold branch. The `SwapStep` WAL
 enum, the `_wkm/hold/` namespace, and the stash-during-checkout logic all exist
 to work around a git limitation that jj simply doesn't have.
+
+However, since wkm creates git worktrees (not jj workspaces) for the colocated
+compatibility reasons above, the swap operation remains necessary in wkm even
+on colocated repos.
 
 ## File Map
 
