@@ -1,8 +1,9 @@
 use clap::{Args, Subcommand};
-use wkm_core::git::cli::CliGit;
+use wkm_core::git::{GitBranches, GitDiscovery, GitStatus};
 use wkm_core::ops::{list, worktree};
 use wkm_core::repo::RepoContext;
 
+use crate::backend::with_backend;
 use crate::ui;
 
 #[derive(Args)]
@@ -44,50 +45,47 @@ pub struct RemoveArgs {
 pub fn run(args: &WorktreeArgs) -> anyhow::Result<()> {
     let cwd = std::env::current_dir()?;
     let ctx = RepoContext::from_path(&cwd)?;
-    let git = CliGit::new(&cwd);
 
-    match &args.command {
-        WorktreeCommands::Create(create_args) => {
-            let result = worktree::create(
-                &ctx,
-                &git,
-                &worktree::CreateOptions {
-                    branch: create_args.branch.clone(),
-                    base: create_args.base.clone(),
-                    description: create_args.description.clone(),
-                },
-            )?;
-            if result.created_branch {
-                println!("Created branch '{}'", result.branch);
-            }
-            println!("Worktree: {}", result.worktree_path.display());
-        }
-        WorktreeCommands::Remove(remove_args) => {
-            let branch = remove_args.branch.as_deref();
-            // Try the operation directly first — the core defaults to
-            // current branch when None. If that fails and we're interactive,
-            // offer a picker.
-            let result = worktree::remove(&ctx, &git, branch, remove_args.force);
-            match result {
-                Ok(removed) => println!("Removed worktree for '{removed}'"),
-                Err(e) if branch.is_none() && ui::is_interactive() => {
-                    // Current branch might not have a worktree, or we might be
-                    // in the main worktree. Offer a picker.
-                    let picked = pick_worktree_branch(&ctx, &git)?;
-                    // Show the original error context if the picker was needed
-                    // because of a specific error (e.g., NoWorktree for current branch)
-                    let _ = e; // consume original error
-                    let removed = worktree::remove(&ctx, &git, Some(&picked), remove_args.force)?;
-                    println!("Removed worktree for '{removed}'");
+    with_backend!(ctx, &cwd, git => {
+        match &args.command {
+            WorktreeCommands::Create(create_args) => {
+                let result = worktree::create(
+                    &ctx,
+                    &git,
+                    &worktree::CreateOptions {
+                        branch: create_args.branch.clone(),
+                        base: create_args.base.clone(),
+                        description: create_args.description.clone(),
+                    },
+                )?;
+                if result.created_branch {
+                    println!("Created branch '{}'", result.branch);
                 }
-                Err(e) => return Err(e.into()),
+                println!("Worktree: {}", result.worktree_path.display());
+            }
+            WorktreeCommands::Remove(remove_args) => {
+                let branch = remove_args.branch.as_deref();
+                let result = worktree::remove(&ctx, &git, branch, remove_args.force);
+                match result {
+                    Ok(removed) => println!("Removed worktree for '{removed}'"),
+                    Err(e) if branch.is_none() && ui::is_interactive() => {
+                        let picked = pick_worktree_branch(&ctx, &git)?;
+                        let _ = e;
+                        let removed = worktree::remove(&ctx, &git, Some(&picked), remove_args.force)?;
+                        println!("Removed worktree for '{removed}'");
+                    }
+                    Err(e) => return Err(e.into()),
+                }
             }
         }
-    }
-    Ok(())
+        Ok(())
+    })
 }
 
-fn pick_worktree_branch(ctx: &RepoContext, git: &CliGit) -> anyhow::Result<String> {
+fn pick_worktree_branch(
+    ctx: &RepoContext,
+    git: &(impl GitDiscovery + GitBranches + GitStatus),
+) -> anyhow::Result<String> {
     let entries = list::list(ctx, git)?;
     let with_worktrees: Vec<_> = entries
         .iter()

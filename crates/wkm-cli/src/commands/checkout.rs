@@ -1,8 +1,9 @@
 use clap::Args;
-use wkm_core::git::cli::CliGit;
+use wkm_core::git::{GitBranches, GitDiscovery, GitStatus};
 use wkm_core::ops::{checkout, list};
 use wkm_core::repo::RepoContext;
 
+use crate::backend::with_backend;
 use crate::ui;
 
 #[derive(Args)]
@@ -20,29 +21,33 @@ pub struct CheckoutArgs {
 pub fn run(args: &CheckoutArgs) -> anyhow::Result<()> {
     let cwd = std::env::current_dir()?;
     let ctx = RepoContext::from_path(&cwd)?;
-    let git = CliGit::new(&cwd);
 
-    let branch = match &args.branch {
-        Some(b) => b.clone(),
-        None => {
-            if args.create {
-                anyhow::bail!("Branch name required with -b");
+    with_backend!(ctx, &cwd, git => {
+        let branch = match &args.branch {
+            Some(b) => b.clone(),
+            None => {
+                if args.create {
+                    anyhow::bail!("Branch name required with -b");
+                }
+                pick_branch(&ctx, &git)?
             }
-            pick_branch(&ctx, &git)?
-        }
-    };
+        };
 
-    if args.create {
-        checkout::checkout_create(&ctx, &git, &cwd, &branch, None)?;
-        println!("Created and switched to '{branch}'");
-    } else {
-        checkout::checkout(&ctx, &git, &cwd, &branch, args.include_untracked)?;
-        println!("Switched to '{branch}'");
-    }
-    Ok(())
+        if args.create {
+            checkout::checkout_create(&ctx, &git, &cwd, &branch, None)?;
+            println!("Created and switched to '{branch}'");
+        } else {
+            checkout::checkout(&ctx, &git, &cwd, &branch, args.include_untracked)?;
+            println!("Switched to '{branch}'");
+        }
+        Ok(())
+    })
 }
 
-fn pick_branch(ctx: &RepoContext, git: &CliGit) -> anyhow::Result<String> {
+fn pick_branch(
+    ctx: &RepoContext,
+    git: &(impl GitDiscovery + GitBranches + GitStatus),
+) -> anyhow::Result<String> {
     if !ui::is_interactive() {
         anyhow::bail!("Branch argument required in non-interactive mode");
     }

@@ -142,6 +142,7 @@ mod tests {
                 conflicted: Some("feat".to_string()),
                 pending: vec![],
                 temp_worktrees: vec![],
+                jj_op_id: None,
             },
         });
         state::write_state(&ctx.state_path, &wkm_state).unwrap();

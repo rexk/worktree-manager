@@ -1,8 +1,9 @@
 use clap::Args;
-use wkm_core::git::cli::CliGit;
+use wkm_core::git::{GitBranches, GitDiscovery, GitStatus};
 use wkm_core::ops::{drop_branch, list};
 use wkm_core::repo::RepoContext;
 
+use crate::backend::with_backend;
 use crate::ui;
 
 #[derive(Args)]
@@ -20,42 +21,46 @@ pub struct DropArgs {
 pub fn run(args: &DropArgs) -> anyhow::Result<()> {
     let cwd = std::env::current_dir()?;
     let ctx = RepoContext::from_path(&cwd)?;
-    let git = CliGit::new(&cwd);
 
-    let branch = match &args.branch {
-        Some(b) => b.clone(),
-        None => pick_branch(&ctx, &git)?,
-    };
+    with_backend!(ctx, &cwd, git => {
+        let branch = match &args.branch {
+            Some(b) => b.clone(),
+            None => pick_branch(&ctx, &git)?,
+        };
 
-    if args.delete && !args.yes {
-        if !ui::is_interactive() {
-            anyhow::bail!(
-                "Refusing to delete git branch '{branch}' in non-interactive mode. Use --yes to confirm."
-            );
+        if args.delete && !args.yes {
+            if !ui::is_interactive() {
+                anyhow::bail!(
+                    "Refusing to delete git branch '{branch}' in non-interactive mode. Use --yes to confirm."
+                );
+            }
+            let confirmed = dialoguer::Confirm::new()
+                .with_prompt(format!(
+                    "Delete git branch '{branch}'? This is irreversible"
+                ))
+                .default(false)
+                .interact()?;
+            if !confirmed {
+                anyhow::bail!("Cancelled");
+            }
         }
-        let confirmed = dialoguer::Confirm::new()
-            .with_prompt(format!(
-                "Delete git branch '{branch}'? This is irreversible"
-            ))
-            .default(false)
-            .interact()?;
-        if !confirmed {
-            anyhow::bail!("Cancelled");
-        }
-    }
 
-    let reparented = drop_branch::drop(&ctx, &git, &branch, args.delete)?;
-    if !reparented.is_empty() {
-        println!("Re-parented: {}", reparented.join(", "));
-    }
-    println!("Dropped '{branch}'");
-    if args.delete {
-        println!("Deleted git branch '{branch}'");
-    }
-    Ok(())
+        let reparented = drop_branch::drop(&ctx, &git, &branch, args.delete)?;
+        if !reparented.is_empty() {
+            println!("Re-parented: {}", reparented.join(", "));
+        }
+        println!("Dropped '{branch}'");
+        if args.delete {
+            println!("Deleted git branch '{branch}'");
+        }
+        Ok(())
+    })
 }
 
-fn pick_branch(ctx: &RepoContext, git: &CliGit) -> anyhow::Result<String> {
+fn pick_branch(
+    ctx: &RepoContext,
+    git: &(impl GitDiscovery + GitBranches + GitStatus),
+) -> anyhow::Result<String> {
     if !ui::is_interactive() {
         anyhow::bail!("Branch argument required in non-interactive mode");
     }

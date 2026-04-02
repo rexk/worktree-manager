@@ -1,8 +1,8 @@
 use clap::Args;
-use wkm_core::git::cli::CliGit;
 use wkm_core::ops::list;
 use wkm_core::repo::RepoContext;
 
+use crate::backend::with_backend;
 use crate::ui;
 
 #[derive(Args)]
@@ -35,38 +35,37 @@ fn pick_branch_with_worktree(ctx: &RepoContext) -> anyhow::Result<String> {
         anyhow::bail!("Branch argument required in non-interactive mode");
     }
 
-    let git = CliGit::new(&ctx.main_worktree);
-    let entries = list::list(ctx, &git)?;
-    // Filter to branches that have a worktree (cd-able), plus the base branch
-    let state = wkm_core::state::read_state(&ctx.state_path)?
-        .ok_or_else(|| anyhow::anyhow!("Not initialized"))?;
-    let base = &state.config.base_branch;
+    with_backend!(ctx, &ctx.main_worktree, git => {
+        let entries = list::list(ctx, &git)?;
+        let state = wkm_core::state::read_state(&ctx.state_path)?
+            .ok_or_else(|| anyhow::anyhow!("Not initialized"))?;
+        let base = &state.config.base_branch;
 
-    let mut items: Vec<(String, String)> = Vec::new();
-    // Add base branch (always has a worktree — the main worktree)
-    items.push((
-        base.clone(),
-        format!("{base}  [{}]", ctx.main_worktree.display()),
-    ));
-    for e in &entries {
-        if let Some(ref wt) = e.worktree_path {
-            items.push((e.name.clone(), format!("{}  [{}]", e.name, wt.display())));
+        let mut items: Vec<(String, String)> = Vec::new();
+        items.push((
+            base.clone(),
+            format!("{base}  [{}]", ctx.main_worktree.display()),
+        ));
+        for e in &entries {
+            if let Some(ref wt) = e.worktree_path {
+                items.push((e.name.clone(), format!("{}  [{}]", e.name, wt.display())));
+            }
         }
-    }
 
-    if items.is_empty() {
-        anyhow::bail!("No branches with worktrees");
-    }
+        if items.is_empty() {
+            anyhow::bail!("No branches with worktrees");
+        }
 
-    let display: Vec<&str> = items.iter().map(|(_, d)| d.as_str()).collect();
-    let selection = dialoguer::FuzzySelect::new()
-        .with_prompt("Switch to worktree")
-        .items(&display)
-        .default(0)
-        .interact_opt()?;
+        let display: Vec<&str> = items.iter().map(|(_, d)| d.as_str()).collect();
+        let selection = dialoguer::FuzzySelect::new()
+            .with_prompt("Switch to worktree")
+            .items(&display)
+            .default(0)
+            .interact_opt()?;
 
-    match selection {
-        Some(idx) => Ok(items[idx].0.clone()),
-        None => anyhow::bail!("Cancelled"),
-    }
+        match selection {
+            Some(idx) => Ok(items[idx].0.clone()),
+            None => anyhow::bail!("Cancelled"),
+        }
+    })
 }

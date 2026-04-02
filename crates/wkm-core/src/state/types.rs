@@ -134,6 +134,10 @@ pub enum WalOp {
         conflicted: Option<String>,
         pending: Vec<String>,
         temp_worktrees: Vec<(String, PathBuf)>,
+        /// jj operation ID recorded before sync, for rollback via `jj op restore`.
+        /// Only set when sync runs through the jj backend.
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        jj_op_id: Option<String>,
     },
     Merge {
         child_branch: String,
@@ -230,6 +234,7 @@ mod tests {
                 conflicted: Some("conflict-branch".to_string()),
                 pending: vec!["pending-branch".to_string()],
                 temp_worktrees: vec![("branch".to_string(), "/tmp/wt".into())],
+                jj_op_id: None,
             },
         });
         let toml_str = toml::to_string_pretty(&state).unwrap();
