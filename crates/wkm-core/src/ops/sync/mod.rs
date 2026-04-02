@@ -1,3 +1,5 @@
+mod jj;
+
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
@@ -6,7 +8,7 @@ use crate::error::WkmError;
 use crate::git::types::RebaseResult;
 use crate::git::{GitBranches, GitDiscovery, GitMutations, GitStash, GitStatus, GitWorktrees};
 use crate::graph;
-use crate::repo::RepoContext;
+use crate::repo::{RepoContext, VcsBackend};
 use crate::state;
 use crate::state::lock::WkmLock;
 use crate::state::types::{WalEntry, WalOp};
@@ -19,7 +21,46 @@ pub struct SyncResult {
 }
 
 /// Sync all tracked branches by rebasing onto their parents.
+///
+/// Dispatches to `sync_git()` or `sync_jj()` based on detected VCS backend.
 pub fn sync(
+    ctx: &RepoContext,
+    git: &(impl GitDiscovery + GitBranches + GitWorktrees + GitStatus + GitStash + GitMutations),
+) -> Result<SyncResult, WkmError> {
+    match ctx.vcs_backend {
+        VcsBackend::JjColocated => jj::sync_jj(ctx, git),
+        VcsBackend::Git => sync_git(ctx, git),
+    }
+}
+
+/// Continue a sync after conflict resolution.
+///
+/// Dispatches to `sync_continue_git()` or `sync_continue_jj()` based on detected VCS backend.
+pub fn sync_continue(
+    ctx: &RepoContext,
+    git: &(impl GitDiscovery + GitBranches + GitWorktrees + GitStatus + GitStash + GitMutations),
+) -> Result<SyncResult, WkmError> {
+    match ctx.vcs_backend {
+        VcsBackend::JjColocated => jj::sync_continue_jj(ctx, git),
+        VcsBackend::Git => sync_continue_git(ctx, git),
+    }
+}
+
+/// Abort a sync, restoring all branches to pre-sync state.
+///
+/// Dispatches to `sync_abort_git()` or `sync_abort_jj()` based on detected VCS backend.
+pub fn sync_abort(
+    ctx: &RepoContext,
+    git: &(impl GitDiscovery + GitBranches + GitWorktrees + GitStatus + GitStash + GitMutations),
+) -> Result<(), WkmError> {
+    match ctx.vcs_backend {
+        VcsBackend::JjColocated => jj::sync_abort_jj(ctx, git),
+        VcsBackend::Git => sync_abort_git(ctx, git),
+    }
+}
+
+/// Sync all tracked branches using the git backend.
+fn sync_git(
     ctx: &RepoContext,
     git: &(impl GitDiscovery + GitBranches + GitWorktrees + GitStatus + GitStash + GitMutations),
 ) -> Result<SyncResult, WkmError> {
@@ -88,6 +129,7 @@ pub fn sync(
             conflicted: None,
             pending: branches_to_sync.clone(),
             temp_worktrees: vec![],
+            jj_op_id: None,
         },
     });
     state::write_state(&ctx.state_path, &wkm_state)?;
@@ -229,8 +271,8 @@ pub fn sync(
     })
 }
 
-/// Continue a sync after conflict resolution.
-pub fn sync_continue(
+/// Continue a sync after conflict resolution (git backend).
+fn sync_continue_git(
     ctx: &RepoContext,
     git: &(impl GitDiscovery + GitBranches + GitWorktrees + GitStatus + GitStash + GitMutations),
 ) -> Result<SyncResult, WkmError> {
@@ -345,8 +387,8 @@ pub fn sync_continue(
     }
 }
 
-/// Abort a sync, restoring all branches to pre-sync refs.
-pub fn sync_abort(
+/// Abort a sync, restoring all branches to pre-sync refs (git backend).
+fn sync_abort_git(
     ctx: &RepoContext,
     git: &(impl GitDiscovery + GitBranches + GitWorktrees + GitStatus + GitStash + GitMutations),
 ) -> Result<(), WkmError> {

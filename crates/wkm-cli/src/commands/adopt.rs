@@ -1,8 +1,9 @@
 use clap::Args;
-use wkm_core::git::cli::CliGit;
+use wkm_core::git::{GitBranches, GitDiscovery, GitWorktrees};
 use wkm_core::ops::adopt;
 use wkm_core::repo::RepoContext;
 
+use crate::backend::with_backend;
 use crate::ui;
 
 #[derive(Args)]
@@ -20,41 +21,45 @@ pub struct AdoptArgs {
 pub fn run(args: &AdoptArgs) -> anyhow::Result<()> {
     let cwd = std::env::current_dir()?;
     let ctx = RepoContext::from_path(&cwd)?;
-    let git = CliGit::new(&cwd);
 
-    if args.all {
-        let branches = adopt::discover_untracked(&ctx, &git)?;
-        if branches.is_empty() {
-            println!("No untracked branches to adopt.");
-            return Ok(());
+    with_backend!(ctx, &cwd, git => {
+        if args.all {
+            let branches = adopt::discover_untracked(&ctx, &git)?;
+            if branches.is_empty() {
+                println!("No untracked branches to adopt.");
+                return Ok(());
+            }
+            let result = adopt::adopt(&ctx, &git, &branches, args.parent.as_deref(), true)?;
+            for b in &result.adopted {
+                println!("Adopted '{b}'");
+            }
+            for b in &result.skipped {
+                println!("Skipped '{b}' (already tracked)");
+            }
+        } else if args.branches.is_empty() {
+            let selected = pick_untracked(&ctx, &git)?;
+            if selected.is_empty() {
+                println!("No branches selected.");
+                return Ok(());
+            }
+            let result = adopt::adopt(&ctx, &git, &selected, args.parent.as_deref(), false)?;
+            for b in &result.adopted {
+                println!("Adopted '{b}'");
+            }
+        } else {
+            let result = adopt::adopt(&ctx, &git, &args.branches, args.parent.as_deref(), false)?;
+            for b in &result.adopted {
+                println!("Adopted '{b}'");
+            }
         }
-        let result = adopt::adopt(&ctx, &git, &branches, args.parent.as_deref(), true)?;
-        for b in &result.adopted {
-            println!("Adopted '{b}'");
-        }
-        for b in &result.skipped {
-            println!("Skipped '{b}' (already tracked)");
-        }
-    } else if args.branches.is_empty() {
-        let selected = pick_untracked(&ctx, &git)?;
-        if selected.is_empty() {
-            println!("No branches selected.");
-            return Ok(());
-        }
-        let result = adopt::adopt(&ctx, &git, &selected, args.parent.as_deref(), false)?;
-        for b in &result.adopted {
-            println!("Adopted '{b}'");
-        }
-    } else {
-        let result = adopt::adopt(&ctx, &git, &args.branches, args.parent.as_deref(), false)?;
-        for b in &result.adopted {
-            println!("Adopted '{b}'");
-        }
-    }
-    Ok(())
+        Ok(())
+    })
 }
 
-fn pick_untracked(ctx: &RepoContext, git: &CliGit) -> anyhow::Result<Vec<String>> {
+fn pick_untracked(
+    ctx: &RepoContext,
+    git: &(impl GitDiscovery + GitBranches + GitWorktrees),
+) -> anyhow::Result<Vec<String>> {
     if !ui::is_interactive() {
         anyhow::bail!("Specify one or more branches, or use --all");
     }

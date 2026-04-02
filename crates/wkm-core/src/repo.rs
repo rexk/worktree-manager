@@ -5,6 +5,15 @@ use crate::error::WkmError;
 use crate::git::GitDiscovery;
 use crate::state;
 
+/// Which VCS backend is available for this repository.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VcsBackend {
+    /// Pure git repository — use git CLI for all operations.
+    Git,
+    /// Colocated jj+git repository with `jj` CLI available on PATH.
+    JjColocated,
+}
+
 /// Resolved paths for a wkm-managed repository.
 #[derive(Debug, Clone)]
 pub struct RepoContext {
@@ -20,6 +29,8 @@ pub struct RepoContext {
     pub storage_dir: PathBuf,
     /// Repository name (last component of main worktree path).
     pub repo_name: String,
+    /// Detected VCS backend.
+    pub vcs_backend: VcsBackend,
 }
 
 /// Resolve the base data directory for wkm storage using tiered resolution:
@@ -50,6 +61,24 @@ fn resolve_base_data_dir() -> Result<PathBuf, WkmError> {
 
     #[cfg(not(windows))]
     Ok(home.join(".local/share/wkm"))
+}
+
+/// Detect whether the repository is a colocated jj+git repo with `jj` available.
+fn detect_vcs_backend(main_worktree: &Path) -> VcsBackend {
+    // Check if `.jj/` directory exists at the repo root
+    if !main_worktree.join(".jj").is_dir() {
+        return VcsBackend::Git;
+    }
+    // Check if `jj` CLI is available on PATH
+    match std::process::Command::new("jj")
+        .arg("version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+    {
+        Ok(status) if status.success() => VcsBackend::JjColocated,
+        _ => VcsBackend::Git,
+    }
 }
 
 impl RepoContext {
@@ -84,6 +113,8 @@ impl RepoContext {
             base_dir.join(hash)
         };
 
+        let vcs_backend = detect_vcs_backend(&main_worktree);
+
         Ok(Self {
             git_common_dir,
             main_worktree,
@@ -91,6 +122,7 @@ impl RepoContext {
             lock_path,
             storage_dir,
             repo_name,
+            vcs_backend,
         })
     }
 
