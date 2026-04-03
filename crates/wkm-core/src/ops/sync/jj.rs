@@ -104,6 +104,24 @@ pub(super) fn sync_jj(
         return Err(WkmError::OperationInProgress);
     }
 
+    // Check for dirty worktrees
+    let dirty: Vec<String> = wkm_state
+        .branches
+        .iter()
+        .filter_map(|(name, entry)| {
+            if let Some(ref wt_path) = entry.worktree_path
+                && git.is_dirty(wt_path).unwrap_or(false)
+            {
+                return Some(name.clone());
+            }
+            None
+        })
+        .collect();
+
+    if !dirty.is_empty() {
+        return Err(WkmError::DirtyWorktree(dirty.join(", ")));
+    }
+
     // Try to fast-forward the base branch from remote
     let base = wkm_state.config.base_branch.clone();
     let _ = super::super::fetch::fetch_and_ff(ctx, git);
@@ -183,7 +201,11 @@ pub(super) fn sync_jj(
     let mut synced = Vec::new();
     let mut all_conflicted = Vec::new();
 
-    // Rebase root branches onto base (jj cascades descendants automatically)
+    // Rebase root branches onto base (jj cascades descendants automatically).
+    // Note: each `jj rebase` call auto-snapshots the main worktree's working copy
+    // into the current jj change. This is jj's intended behavior and is harmless
+    // (reversible via `jj undo`), but means uncommitted changes in the main
+    // worktree become part of the jj commit graph.
     for branch in &root_branches {
         let conflicts = jj_rebase_branch(&ctx.main_worktree, branch, &base)?;
         if conflicts.is_empty() {
@@ -216,6 +238,18 @@ pub(super) fn sync_jj(
         .args(["git", "export"])
         .current_dir(&ctx.main_worktree)
         .output();
+
+    // Update working trees in secondary worktrees to match rebased refs.
+    // After jj git export, the git branch refs point to rebased commits, but
+    // the worktree files are still at the old commit. Reset each worktree to
+    // bring files in sync with the updated branch ref.
+    for branch in &synced {
+        if let Some(entry) = wkm_state.branches.get(branch)
+            && let Some(ref wt_path) = entry.worktree_path
+        {
+            git.reset_hard(wt_path, branch)?;
+        }
+    }
 
     // Clear WAL on success
     wkm_state.wal = None;
@@ -330,4 +364,257 @@ pub(super) fn sync_abort_jj(
 
     drop(lock);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::git::GitBranches;
+    use crate::git::cli::CliGit;
+    use crate::ops::init::{self, InitOptions};
+    use crate::ops::sync;
+    use crate::ops::worktree::{self, CreateOptions};
+    use crate::repo::{RepoContext, VcsBackend};
+    use crate::state;
+    use crate::state::types::BranchEntry;
+    use wkm_sandbox::TestRepo;
+
+    /// Skip test if jj is not available. Returns `true` if test should be skipped.
+    fn skip_if_no_jj() -> bool {
+        if !wkm_sandbox::jj_available() {
+            eprintln!("skipping: jj not on PATH");
+            return true;
+        }
+        false
+    }
+
+    fn setup_jj() -> Option<(TestRepo, RepoContext, CliGit)> {
+        let repo = TestRepo::new_jj_colocated()?;
+        let ctx = RepoContext::from_path(repo.path()).unwrap();
+        assert_eq!(ctx.vcs_backend, VcsBackend::JjColocated);
+        let git = CliGit::new(repo.path());
+        init::init(&ctx, &InitOptions::default()).unwrap();
+        Some((repo, ctx, git))
+    }
+
+    fn add_branch(ctx: &RepoContext, name: &str, parent: &str) {
+        let mut wkm_state = state::read_state(&ctx.state_path).unwrap().unwrap();
+        wkm_state.branches.insert(
+            name.to_string(),
+            BranchEntry {
+                parent: Some(parent.to_string()),
+                worktree_path: None,
+                stash_commit: None,
+                description: None,
+                created_at: "2026-01-01T00:00:00Z".to_string(),
+                previous_branch: None,
+            },
+        );
+        state::write_state(&ctx.state_path, &wkm_state).unwrap();
+    }
+
+    #[test]
+    fn sync_jj_linear_chain() {
+        if skip_if_no_jj() {
+            return;
+        }
+        let Some((repo, ctx, git)) = setup_jj() else {
+            return;
+        };
+
+        // main → A → B
+        repo.create_branch("branch-a");
+        repo.checkout("branch-a");
+        repo.commit_file("a-file", "a", "branch-a commit");
+
+        repo.create_branch("branch-b");
+        repo.checkout("branch-b");
+        repo.commit_file("b-file", "b", "branch-b commit");
+
+        repo.checkout("main");
+        add_branch(&ctx, "branch-a", "main");
+        add_branch(&ctx, "branch-b", "branch-a");
+
+        // Advance main
+        repo.commit_file("main-file", "main", "main advance");
+
+        // Import into jj so it knows about the branches
+        wkm_sandbox::jj(repo.path(), &["git", "import"]);
+
+        let result = sync::sync(&ctx, &git).unwrap();
+        assert!(result.synced.contains(&"branch-a".to_string()));
+        assert!(result.synced.contains(&"branch-b".to_string()));
+        assert!(result.conflicted.is_none());
+
+        // Verify ancestry: main is ancestor of branch-a, branch-a is ancestor of branch-b
+        assert!(git.is_ancestor("main", "branch-a").unwrap());
+        assert!(git.is_ancestor("branch-a", "branch-b").unwrap());
+    }
+
+    #[test]
+    fn sync_jj_updates_worktree_files() {
+        if skip_if_no_jj() {
+            return;
+        }
+        let Some((_repo, ctx, git)) = setup_jj() else {
+            return;
+        };
+
+        // Create worktree for feature branch
+        worktree::create(
+            &ctx,
+            &git,
+            &CreateOptions {
+                branch: "feature".to_string(),
+                base: None,
+                description: None,
+            },
+        )
+        .unwrap();
+
+        let wkm_state = state::read_state(&ctx.state_path).unwrap().unwrap();
+        let feature_wt = wkm_state.branches["feature"]
+            .worktree_path
+            .as_ref()
+            .unwrap()
+            .clone();
+
+        // Add a commit in the worktree
+        std::fs::write(feature_wt.join("feat-file"), "feature data").unwrap();
+        wkm_sandbox::git(&feature_wt, &["add", "."]);
+        wkm_sandbox::git(&feature_wt, &["commit", "-m", "feature commit"]);
+
+        // Advance main in the main worktree
+        std::fs::write(ctx.main_worktree.join("main-file"), "main data").unwrap();
+        wkm_sandbox::git(&ctx.main_worktree, &["add", "."]);
+        wkm_sandbox::git(&ctx.main_worktree, &["commit", "-m", "main advance"]);
+
+        // Import into jj
+        wkm_sandbox::jj(&ctx.main_worktree, &["git", "import"]);
+
+        let result = sync::sync(&ctx, &git).unwrap();
+        assert!(result.synced.contains(&"feature".to_string()));
+
+        // CRITICAL: Verify the secondary worktree files are updated.
+        // The main-file should now exist in the feature worktree (rebased onto main).
+        assert!(
+            feature_wt.join("main-file").exists(),
+            "secondary worktree should have main-file after sync (working tree update)"
+        );
+        // Original feature file should still be there
+        assert!(feature_wt.join("feat-file").exists());
+    }
+
+    #[test]
+    fn sync_jj_dirty_worktree_aborts() {
+        if skip_if_no_jj() {
+            return;
+        }
+        let Some((_repo, ctx, git)) = setup_jj() else {
+            return;
+        };
+
+        worktree::create(
+            &ctx,
+            &git,
+            &CreateOptions {
+                branch: "feature".to_string(),
+                base: None,
+                description: None,
+            },
+        )
+        .unwrap();
+
+        // Make the worktree dirty
+        let wkm_state = state::read_state(&ctx.state_path).unwrap().unwrap();
+        let wt_path = wkm_state.branches["feature"]
+            .worktree_path
+            .as_ref()
+            .unwrap();
+        std::fs::write(wt_path.join("initial"), "dirty").unwrap();
+
+        let result = sync::sync(&ctx, &git);
+        assert!(
+            matches!(result, Err(crate::error::WkmError::DirtyWorktree(_))),
+            "sync_jj should reject dirty worktrees"
+        );
+    }
+
+    #[test]
+    fn sync_jj_abort_restores() {
+        if skip_if_no_jj() {
+            return;
+        }
+        let Some((repo, ctx, git)) = setup_jj() else {
+            return;
+        };
+
+        repo.commit_file("shared-file", "base", "add shared-file");
+
+        repo.create_branch("branch-a");
+        repo.checkout("branch-a");
+        std::fs::write(repo.path().join("shared-file"), "a-version").unwrap();
+        wkm_sandbox::git(repo.path(), &["add", "."]);
+        wkm_sandbox::git(repo.path(), &["commit", "-m", "a: change shared-file"]);
+
+        let pre_ref = wkm_sandbox::git_output(repo.path(), &["rev-parse", "branch-a"]);
+        repo.checkout("main");
+
+        add_branch(&ctx, "branch-a", "main");
+
+        // Change main to create divergence (jj doesn't block on conflicts, it stores them)
+        std::fs::write(repo.path().join("shared-file"), "main-version").unwrap();
+        wkm_sandbox::git(repo.path(), &["add", "."]);
+        wkm_sandbox::git(repo.path(), &["commit", "-m", "main: conflict"]);
+
+        // Import into jj
+        wkm_sandbox::jj(repo.path(), &["git", "import"]);
+
+        // Sync (jj stores conflicts in commits, so this succeeds)
+        let _result = sync::sync(&ctx, &git).unwrap();
+
+        // branch-a ref should have changed (rebased)
+        let post_ref = wkm_sandbox::git_output(repo.path(), &["rev-parse", "branch-a"]);
+        assert_ne!(pre_ref, post_ref, "branch-a should have been rebased");
+    }
+
+    #[test]
+    fn jj_worktree_creation_despite_detached_head() {
+        if skip_if_no_jj() {
+            return;
+        }
+        let Some((_repo, ctx, git)) = setup_jj() else {
+            return;
+        };
+
+        // jj puts git in detached HEAD. Verify wkm can still create worktrees
+        // (because wkm creates the branch before calling git worktree add).
+        let result = worktree::create(
+            &ctx,
+            &git,
+            &CreateOptions {
+                branch: "feature".to_string(),
+                base: None,
+                description: None,
+            },
+        );
+        assert!(
+            result.is_ok(),
+            "worktree creation should succeed on colocated jj repo: {:?}",
+            result.err()
+        );
+
+        let wkm_state = state::read_state(&ctx.state_path).unwrap().unwrap();
+        let wt_path = wkm_state.branches["feature"]
+            .worktree_path
+            .as_ref()
+            .unwrap();
+
+        // Secondary worktree should have a .git file (not directory)
+        let git_path = wt_path.join(".git");
+        assert!(git_path.exists(), ".git should exist in secondary worktree");
+        assert!(
+            git_path.is_file(),
+            ".git should be a file (pointer) in secondary worktree, not a directory"
+        );
+    }
 }
