@@ -51,6 +51,9 @@ impl TestRepo {
         git(&path, &["init", "-b", "main"]);
         git(&path, &["config", "user.name", "Test User"]);
         git(&path, &["config", "user.email", "test@example.com"]);
+        // Disable commit signing in test repos so CliGit (which doesn't
+        // suppress global config) won't try to sign during rebase/commit.
+        git(&path, &["config", "commit.gpgsign", "false"]);
 
         let repo = Self {
             _dir: dir,
@@ -260,6 +263,7 @@ impl TestRepo {
         // Configure git user (jj uses git config in colocated mode)
         git(&path, &["config", "user.name", "Test User"]);
         git(&path, &["config", "user.email", "test@example.com"]);
+        git(&path, &["config", "commit.gpgsign", "false"]);
 
         // jj needs its own user config for commits
         jj(

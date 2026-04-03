@@ -521,6 +521,7 @@ mod tests {
         run_git(&path, &["init", "-b", "main"]);
         run_git(&path, &["config", "user.name", "Test"]);
         run_git(&path, &["config", "user.email", "test@test.com"]);
+        run_git(&path, &["config", "commit.gpgsign", "false"]);
         std::fs::write(path.join("initial"), "content").unwrap();
         run_git(&path, &["add", "."]);
         run_git(&path, &["commit", "-m", "initial"]);
