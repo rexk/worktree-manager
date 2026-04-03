@@ -29,6 +29,12 @@ pub fn run(_args: &RepairArgs) -> anyhow::Result<()> {
         for branch in &result.worktree_paths_cleared {
             println!("Cleared missing worktree path for '{branch}'.");
         }
+        for branch in &result.worktree_paths_updated {
+            println!("Updated worktree path for '{branch}'.");
+        }
+        for branch in &result.branches_adopted {
+            println!("Auto-adopted untracked worktree branch '{branch}'.");
+        }
         for branch in &result.orphan_branches_deleted {
             println!("Deleted orphaned branch '{branch}'.");
         }
@@ -41,6 +47,8 @@ pub fn run(_args: &RepairArgs) -> anyhow::Result<()> {
             || result.wal_cleared
             || !result.branches_removed.is_empty()
             || !result.worktree_paths_cleared.is_empty()
+            || !result.worktree_paths_updated.is_empty()
+            || !result.branches_adopted.is_empty()
             || !result.orphan_branches_deleted.is_empty()
             || !result.pending_removals_cleaned.is_empty();
 

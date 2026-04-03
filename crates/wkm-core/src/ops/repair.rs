@@ -12,6 +12,8 @@ pub struct RepairResult {
     pub git_worktree_repaired: bool,
     pub branches_removed: Vec<String>,
     pub worktree_paths_cleared: Vec<String>,
+    pub worktree_paths_updated: Vec<String>,
+    pub branches_adopted: Vec<String>,
     pub orphan_branches_deleted: Vec<String>,
     pub pending_removals_cleaned: Vec<String>,
 }
@@ -23,8 +25,10 @@ pub struct RepairResult {
 /// 3. Clear WAL (rollback incomplete ops)
 /// 4. Remove state entries for branches that no longer exist in git
 /// 5. Clear worktree_path for entries where the path no longer exists on disk
-/// 6. Delete orphaned `_wkm/*` branches not referenced by state or WAL
-/// 7. Clean up pending `.wkm-removing` directories
+/// 6. Reconcile worktree_path for tracked branches against actual git worktrees
+/// 7. Auto-adopt untracked branches checked out in worktrees
+/// 8. Delete orphaned `_wkm/*` branches not referenced by state or WAL
+/// 9. Clean up pending `.wkm-removing` directories
 pub fn repair(
     ctx: &RepoContext,
     git: &(impl GitDiscovery + GitBranches + GitWorktrees + GitStatus + GitStash + GitMutations),
@@ -77,8 +81,57 @@ pub fn repair(
         }
     }
 
-    // 5. Delete orphaned `_wkm/*` branches
+    // 5. Reconcile worktree_path for tracked branches against git worktree list
     let worktrees = git.worktree_list()?;
+    for (name, entry) in wkm_state.branches.iter_mut() {
+        let actual_wt = worktrees
+            .iter()
+            .find(|wt| wt.branch.as_deref() == Some(name.as_str()));
+        match (actual_wt, &entry.worktree_path) {
+            // Branch is in a worktree but state doesn't know about it
+            (Some(wt), None) => {
+                entry.worktree_path = Some(wt.path.clone());
+                result.worktree_paths_updated.push(name.clone());
+            }
+            // Branch is in a different worktree than state thinks
+            (Some(wt), Some(existing)) if *existing != wt.path => {
+                entry.worktree_path = Some(wt.path.clone());
+                result.worktree_paths_updated.push(name.clone());
+            }
+            // Branch is NOT in any worktree but state has a path (already handled by step 4)
+            // Or state matches reality — nothing to do
+            _ => {}
+        }
+    }
+
+    // 6. Auto-adopt untracked branches that are checked out in worktrees
+    let base_branch = &wkm_state.config.base_branch.clone();
+    let now = chrono::Utc::now().to_rfc3339();
+    for wt in &worktrees {
+        if let Some(ref branch) = wt.branch {
+            // Skip base branch, internal branches, and already-tracked branches
+            if branch == base_branch
+                || branch.starts_with("_wkm/")
+                || wkm_state.branches.contains_key(branch.as_str())
+            {
+                continue;
+            }
+            wkm_state.branches.insert(
+                branch.clone(),
+                crate::state::types::BranchEntry {
+                    parent: Some(base_branch.clone()),
+                    worktree_path: Some(wt.path.clone()),
+                    stash_commit: None,
+                    description: None,
+                    created_at: now.clone(),
+                    previous_branch: None,
+                },
+            );
+            result.branches_adopted.push(branch.clone());
+        }
+    }
+
+    // 8. Delete orphaned `_wkm/*` branches
     // Collect all _wkm/* branches that exist
     let mut orphan_candidates: Vec<String> = Vec::new();
     for wt in &worktrees {
@@ -113,7 +166,7 @@ pub fn repair(
         }
     }
 
-    // 6. Clean up leftover .wkm-removing directories in storage_dir
+    // 9. Clean up leftover .wkm-removing directories in storage_dir
     if ctx.storage_dir.exists()
         && let Ok(entries) = std::fs::read_dir(&ctx.storage_dir)
     {
@@ -206,15 +259,19 @@ mod tests {
 
         // Manually set worktree_path to a nonexistent path
         let mut wkm_state = state::read_state(&ctx.state_path).unwrap().unwrap();
+        let real_wt_path = wkm_state.branches["feat"].worktree_path.clone().unwrap();
         wkm_state.branches.get_mut("feat").unwrap().worktree_path =
             Some("/tmp/nonexistent-wt-path-12345".into());
         state::write_state(&ctx.state_path, &wkm_state).unwrap();
 
         let result = repair(&ctx, &git).unwrap();
+        // Step 4 clears the bogus path, then step 5 reconciles from git worktree list
         assert!(result.worktree_paths_cleared.contains(&"feat".to_string()));
+        assert!(result.worktree_paths_updated.contains(&"feat".to_string()));
 
+        // The worktree path should be restored to the real path
         let wkm_state = state::read_state(&ctx.state_path).unwrap().unwrap();
-        assert!(wkm_state.branches["feat"].worktree_path.is_none());
+        assert_eq!(wkm_state.branches["feat"].worktree_path, Some(real_wt_path));
     }
 
     #[test]
@@ -354,5 +411,118 @@ mod tests {
         assert!(!result2.stale_lock_removed);
         assert!(result2.worktree_paths_cleared.is_empty());
         assert!(result2.orphan_branches_deleted.is_empty());
+    }
+
+    #[test]
+    fn repair_adopts_untracked_worktree_branch() {
+        let (repo, ctx, git) = setup();
+
+        // Create a branch and worktree outside wkm
+        repo.create_branch("external-feat");
+        let wt_dir = tempfile::tempdir().unwrap();
+        let wt_path = wt_dir.path().join("ext-wt");
+        wkm_sandbox::git(
+            repo.path(),
+            &[
+                "worktree",
+                "add",
+                wt_path.to_str().unwrap(),
+                "external-feat",
+            ],
+        );
+
+        // Branch is NOT in wkm state
+        let wkm_state = state::read_state(&ctx.state_path).unwrap().unwrap();
+        assert!(!wkm_state.branches.contains_key("external-feat"));
+
+        // Repair should auto-adopt it
+        let result = repair(&ctx, &git).unwrap();
+        assert!(
+            result
+                .branches_adopted
+                .contains(&"external-feat".to_string()),
+            "Expected repair to auto-adopt untracked worktree branch"
+        );
+
+        // Verify it's now in state with the correct worktree path
+        let wkm_state = state::read_state(&ctx.state_path).unwrap().unwrap();
+        assert!(wkm_state.branches.contains_key("external-feat"));
+        assert_eq!(
+            wkm_state.branches["external-feat"].parent,
+            Some("main".to_string())
+        );
+        assert!(wkm_state.branches["external-feat"].worktree_path.is_some());
+
+        // Cleanup
+        wkm_sandbox::git(
+            repo.path(),
+            &["worktree", "remove", wt_path.to_str().unwrap()],
+        );
+    }
+
+    #[test]
+    fn repair_reconciles_worktree_path_for_tracked_branch() {
+        let (repo, ctx, git) = setup();
+
+        // Create a branch tracked in wkm state but with no worktree_path
+        repo.create_branch("tracked-feat");
+        let mut wkm_state = state::read_state(&ctx.state_path).unwrap().unwrap();
+        wkm_state.branches.insert(
+            "tracked-feat".to_string(),
+            BranchEntry {
+                parent: Some("main".to_string()),
+                worktree_path: None,
+                stash_commit: None,
+                description: None,
+                created_at: "2026-01-01T00:00:00Z".to_string(),
+                previous_branch: None,
+            },
+        );
+        state::write_state(&ctx.state_path, &wkm_state).unwrap();
+
+        // Now create a worktree for it outside wkm
+        let wt_dir = tempfile::tempdir().unwrap();
+        let wt_path = wt_dir.path().join("tracked-wt");
+        wkm_sandbox::git(
+            repo.path(),
+            &["worktree", "add", wt_path.to_str().unwrap(), "tracked-feat"],
+        );
+
+        // Repair should update the worktree_path
+        let result = repair(&ctx, &git).unwrap();
+        assert!(
+            result
+                .worktree_paths_updated
+                .contains(&"tracked-feat".to_string()),
+            "Expected repair to update worktree path for tracked branch"
+        );
+
+        // Verify the path was updated
+        let wkm_state = state::read_state(&ctx.state_path).unwrap().unwrap();
+        assert!(wkm_state.branches["tracked-feat"].worktree_path.is_some());
+
+        // Cleanup
+        wkm_sandbox::git(
+            repo.path(),
+            &["worktree", "remove", wt_path.to_str().unwrap()],
+        );
+    }
+
+    #[test]
+    fn repair_does_not_adopt_base_branch() {
+        let (_repo, ctx, git) = setup();
+
+        // The main branch is in the main worktree but should NOT be adopted
+        let result = repair(&ctx, &git).unwrap();
+        assert!(
+            result.branches_adopted.is_empty(),
+            "Base branch should not be auto-adopted"
+        );
+
+        let wkm_state = state::read_state(&ctx.state_path).unwrap().unwrap();
+        assert!(
+            !wkm_state.branches.contains_key("main"),
+            "Base branch should not appear in branches map"
+        );
     }
 }
