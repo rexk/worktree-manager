@@ -97,6 +97,23 @@ Phase 1 (detection + JjCli backend) and Phase 2 (sync dual path) are implemented
 Further jj integration phases are deprioritized until the colocated workspace
 situation (jj#4644) is resolved and the value proposition clarifies.
 
+### Validated Gaps (fixed)
+
+Post-implementation review identified two bugs in the initial `sync_jj()`:
+
+1. **Working tree desync** — After `jj rebase` + `jj git export`, secondary git
+   worktrees had stale files because only the git branch refs were updated, not
+   the worktree files. Fixed by calling `git reset --hard <branch>` in each
+   affected worktree after export.
+
+2. **Missing dirty worktree check** — `sync_jj()` did not check for dirty
+   worktrees before rebasing, unlike `sync_git()`. This risked data loss if a
+   worktree had uncommitted changes. Fixed by adding the same dirty check from
+   `sync_git()`.
+
+Both fixes are covered by integration tests in `ops/sync/jj.rs` (skipped
+automatically when `jj` is not on PATH).
+
 ## Architecture Overview
 
 wkm opportunistically uses jj when the repository is **colocated** (`.jj/` + `.git/`

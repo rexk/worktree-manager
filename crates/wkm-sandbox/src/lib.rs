@@ -203,6 +203,92 @@ pub fn git_output(dir: &Path, args: &[&str]) -> String {
         .to_string()
 }
 
+/// Check if `jj` is available on PATH.
+pub fn jj_available() -> bool {
+    Command::new("jj")
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// Run a jj command, panicking on failure.
+pub fn jj(dir: &Path, args: &[&str]) -> std::process::Output {
+    let output = Command::new("jj")
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .expect("failed to run jj");
+    if !output.status.success() {
+        panic!(
+            "jj {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    output
+}
+
+/// Run a jj command and return stdout, trimmed.
+pub fn jj_output(dir: &Path, args: &[&str]) -> String {
+    let output = jj(dir, args);
+    String::from_utf8(output.stdout)
+        .expect("non-utf8 jj output")
+        .trim()
+        .to_string()
+}
+
+impl TestRepo {
+    /// Create a colocated jj+git repository for testing.
+    ///
+    /// Initializes a jj repo with git colocated backend, configures git
+    /// user settings, and creates an initial commit. Returns `None` if `jj`
+    /// is not available on PATH.
+    pub fn new_jj_colocated() -> Option<Self> {
+        if !jj_available() {
+            return None;
+        }
+
+        let dir = TempDir::new().expect("failed to create temp dir");
+        let path = canonicalize(dir.path());
+
+        // Initialize colocated jj+git repo
+        jj(&path, &["git", "init", "--colocate"]);
+
+        // Configure git user (jj uses git config in colocated mode)
+        git(&path, &["config", "user.name", "Test User"]);
+        git(&path, &["config", "user.email", "test@example.com"]);
+
+        // jj needs its own user config for commits
+        jj(
+            &path,
+            &["config", "set", "--repo", "user.name", "Test User"],
+        );
+        jj(
+            &path,
+            &["config", "set", "--repo", "user.email", "test@example.com"],
+        );
+
+        let repo = Self {
+            _dir: dir,
+            path,
+            _remote_dir: None,
+        };
+
+        // Create initial commit via git (jj will import it)
+        std::fs::write(repo.path.join("initial"), "initial content").expect("failed to write file");
+        git(&repo.path, &["add", "initial"]);
+        git(&repo.path, &["commit", "-m", "initial commit"]);
+
+        // Create the main bookmark in jj pointing at the git main branch
+        jj(&repo.path, &["git", "import"]);
+
+        Some(repo)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
