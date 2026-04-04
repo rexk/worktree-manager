@@ -40,6 +40,9 @@ pub struct WkmConfig {
     /// Fully resolved storage directory path (e.g. `/home/user/.local/share/wkm/a1b2c3d4`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub storage_dir: Option<PathBuf>,
+    /// How secondary worktrees are created: `git` (default), `git_jj` (dual), or `jj` (jj-only).
+    #[serde(default)]
+    pub worktree_backend: WorktreeBackend,
     /// Legacy field — read from old TOML files during deserialization, never written.
     /// Migrated into `storage_dir` by `normalize_storage_dir()`.
     #[serde(skip_serializing, default)]
@@ -55,6 +58,7 @@ impl WkmConfig {
             prefix: None,
             max_branch_length: None,
             storage_dir: None,
+            worktree_backend: WorktreeBackend::default(),
             resolved_storage_dir: None,
         }
     }
@@ -89,6 +93,22 @@ pub enum NamingStrategy {
     Random,
 }
 
+/// How secondary worktrees are created and managed.
+///
+/// - `Git`: Pure git worktrees (`.git` file, no `.jj/`). Default for non-colocated repos.
+/// - `GitJj`: Dual-registered worktrees (`.git` file AND `.jj/` directory). Both git and jj
+///   commands work in secondary worktrees. Default for colocated jj+git repos.
+/// - `Jj`: jj workspaces only (`.jj/` directory, no `.git`). Simplest operations but no
+///   git tooling in secondary worktrees.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorktreeBackend {
+    #[default]
+    Git,
+    GitJj,
+    Jj,
+}
+
 /// A tracked branch entry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BranchEntry {
@@ -98,6 +118,9 @@ pub struct BranchEntry {
     pub worktree_path: Option<PathBuf>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stash_commit: Option<String>,
+    /// jj workspace name for dual-registered (GitJj) or jj-only (Jj) worktrees.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub jj_workspace_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     pub created_at: String,
@@ -188,6 +211,7 @@ mod tests {
                 parent: Some("main".to_string()),
                 worktree_path: Some("/tmp/wt".into()),
                 stash_commit: None,
+                jj_workspace_name: None,
                 description: Some("A feature".to_string()),
                 created_at: "2026-01-01T00:00:00Z".to_string(),
                 previous_branch: None,

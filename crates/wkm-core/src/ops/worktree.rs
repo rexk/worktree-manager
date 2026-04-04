@@ -6,7 +6,7 @@ use crate::git::{GitBranches, GitDiscovery, GitWorktrees};
 use crate::repo::RepoContext;
 use crate::state;
 use crate::state::lock::WkmLock;
-use crate::state::types::BranchEntry;
+use crate::state::types::{BranchEntry, WorktreeBackend};
 
 /// Options for creating a worktree.
 pub struct CreateOptions {
@@ -81,7 +81,29 @@ pub fn create(
 
     // Create the worktree
     std::fs::create_dir_all(&ctx.storage_dir)?;
-    git.worktree_add(&worktree_path, &opts.branch)?;
+
+    let jj_workspace_name = match wkm_state.config.worktree_backend {
+        WorktreeBackend::Git | WorktreeBackend::GitJj => {
+            // Both Git and GitJj start with a proper git worktree
+            git.worktree_add(&worktree_path, &opts.branch)?;
+
+            if wkm_state.config.worktree_backend == WorktreeBackend::GitJj {
+                // Dual registration: create jj workspace at temp, move .jj/ into git worktree
+                let ws_name = sanitize_jj_workspace_name(&opts.branch);
+                setup_jj_workspace(ctx, &worktree_path, &ws_name, &opts.branch)?;
+                Some(ws_name)
+            } else {
+                None
+            }
+        }
+        WorktreeBackend::Jj => {
+            // jj-only: create workspace directly (no git worktree)
+            let ws_name = sanitize_jj_workspace_name(&opts.branch);
+            let jj = crate::git::jj_cli::JjCli::new(&ctx.main_worktree);
+            jj.workspace_add(&worktree_path, &ws_name, &opts.branch)?;
+            Some(ws_name)
+        }
+    };
 
     // Update state
     let now = chrono::Utc::now().to_rfc3339();
@@ -91,6 +113,7 @@ pub fn create(
             parent: Some(parent),
             worktree_path: Some(worktree_path.clone()),
             stash_commit: None,
+            jj_workspace_name,
             description: opts.description.clone(),
             created_at: now,
             previous_branch: None,
@@ -149,9 +172,17 @@ pub fn remove(
         return Err(WkmError::RemoveFromInside);
     }
 
+    // Forget jj workspace if this was a dual or jj-only worktree
+    let jj_ws_name = entry.jj_workspace_name.clone();
+    if let Some(ref ws_name) = jj_ws_name {
+        let jj = crate::git::jj_cli::JjCli::new(&ctx.main_worktree);
+        let _ = jj.workspace_forget(ws_name);
+    }
+
     // Update state first — clear worktree_path before touching the filesystem
     if let Some(entry) = wkm_state.branches.get_mut(&branch_name) {
         entry.worktree_path = None;
+        entry.jj_workspace_name = None;
     }
     state::write_state(&ctx.state_path, &wkm_state)?;
 
@@ -199,6 +230,73 @@ fn spawn_background_delete(path: &std::path::Path) {
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn();
+}
+
+/// Sanitize a branch name into a valid jj workspace ID.
+/// Replaces `/` and other problematic characters with `-`.
+fn sanitize_jj_workspace_name(branch: &str) -> String {
+    branch
+        .chars()
+        .map(|c| {
+            if c == '/' || c == '\\' || c == ' ' {
+                '-'
+            } else {
+                c
+            }
+        })
+        .collect()
+}
+
+/// Set up a jj workspace in an existing git worktree (dual registration).
+///
+/// 1. Create jj workspace at a temp sibling path
+/// 2. Move `.jj/` from temp into the git worktree
+/// 3. Write `.jj/.gitignore` (jj omits this in secondary workspaces)
+/// 4. Remove the temp directory
+fn setup_jj_workspace(
+    ctx: &RepoContext,
+    worktree_path: &std::path::Path,
+    ws_name: &str,
+    branch: &str,
+) -> Result<(), WkmError> {
+    let jj = crate::git::jj_cli::JjCli::new(&ctx.main_worktree);
+
+    // Create temp directory as a sibling of the worktree so relative paths match
+    let tmp_name = format!(".wkm-jj-tmp-{}", encoding::generate_worktree_id());
+    let tmp_path = worktree_path
+        .parent()
+        .unwrap_or(worktree_path)
+        .join(&tmp_name);
+
+    // Create jj workspace at temp location pointed at the branch
+    if let Err(e) = jj.workspace_add(&tmp_path, ws_name, branch) {
+        // Clean up temp dir on failure
+        let _ = std::fs::remove_dir_all(&tmp_path);
+        return Err(e);
+    }
+
+    // Move .jj/ from temp to the git worktree
+    let tmp_jj = tmp_path.join(".jj");
+    let dest_jj = worktree_path.join(".jj");
+    if let Err(e) = std::fs::rename(&tmp_jj, &dest_jj) {
+        // Clean up: forget the workspace and remove temp
+        let _ = jj.workspace_forget(ws_name);
+        let _ = std::fs::remove_dir_all(&tmp_path);
+        return Err(WkmError::Other(format!(
+            "failed to move .jj/ to worktree: {e}"
+        )));
+    }
+
+    // Write .jj/.gitignore — jj creates this in main repos but not secondary workspaces
+    let gitignore_path = dest_jj.join(".gitignore");
+    if !gitignore_path.exists() {
+        let _ = std::fs::write(&gitignore_path, "/*\n");
+    }
+
+    // Remove the (now empty except for checked-out files) temp directory
+    let _ = std::fs::remove_dir_all(&tmp_path);
+
+    Ok(())
 }
 
 #[cfg(test)]

@@ -39,10 +39,10 @@ provides a clean multi-workspace story today:
 | Pure jj (non-colocated) | Yes | No | Yes |
 | Colocated + `jj workspace add` | Yes | **No** (no `.git/`) | Yes |
 | Colocated + raw `git worktree add` | **No** (detached HEAD) | — | — |
-| Colocated + wkm | **Yes** | **Yes** | In main worktree only |
+| Colocated + wkm (`GitJj` backend) | **Yes** | **Yes** | **Yes (dual registration)** |
 
-**wkm is currently the only way to get multi-workspace development on colocated
-repos with working git tooling.**
+**wkm is the only way to get multi-workspace development on colocated repos with
+both git AND jj tooling working in secondary worktrees** (dual registration).
 
 ### What motivated wkm (from SPEC.md §1)
 
@@ -93,9 +93,11 @@ for colocated repos.
 
 ## Implementation Status
 
-Phase 1 (detection + JjCli backend) and Phase 2 (sync dual path) are implemented.
-Further jj integration phases are deprioritized until the colocated workspace
-situation (jj#4644) is resolved and the value proposition clarifies.
+- **Phase 1** (detection + JjCli backend): Implemented.
+- **Phase 2** (sync dual path): Implemented. `sync_jj()` uses `jj rebase -b` for cascade rebase.
+- **Phase 3** (dual registration): Implemented. `WorktreeBackend::GitJj` creates secondary
+  worktrees with both `.git` and `.jj/`, enabling both git and jj commands in every worktree.
+  Default for colocated repos. See SPEC.md §5.7 and §8.7.
 
 ### Validated Gaps (fixed)
 
@@ -144,20 +146,33 @@ Has `jj_run_ok()` / `jj_run_in()` helpers for running jj commands and
 - `sync_jj()` — Uses `jj rebase -b <branch> -d <parent>` for native cascade rebase.
   WAL stores `jj_op_id` for rollback via `jj op restore`.
 
-### Why wkm worktrees work on colocated repos
+### Dual Registration (Phase 3)
 
-wkm uses `git worktree add` (not `jj workspace add`) for creating secondary
-workspaces. This is intentional:
+With the `GitJj` worktree backend (default for colocated repos), secondary
+worktrees have **both** `.git` and `.jj/`:
 
-- `git worktree add <path> <branch>` creates a worktree with a `.git` file
-  pointing back to the main repo's git database. Git tooling works.
-- wkm always creates the branch before calling `worktree_add`, avoiding the
-  detached HEAD problem that blocks raw `git worktree add` on colocated repos.
-- Secondary worktrees don't have `.jj/`, but wkm's `sync_jj()` runs jj
-  commands from `ctx.main_worktree` (where `.jj/` exists), so jj operations
-  still benefit from the colocated setup.
-- The `JjCli::worktree_add()` delegates to `CliGit::worktree_add()` — this is
-  correct and intentional. We want git worktrees, not jj workspaces.
+1. `git worktree add <path> <branch>` — creates `.git` file (git tooling works)
+2. `jj workspace add <tmpdir> --name <ws> -r <branch>` — creates jj workspace at temp
+3. Move `<tmpdir>/.jj/` into `<path>/.jj/`
+4. Write `/*` to `<path>/.jj/.gitignore` (jj omits this in secondary workspaces)
+5. Remove `<tmpdir>`
+
+After jj operations that change the working copy, git HEAD is synced:
+```
+git symbolic-ref HEAD refs/heads/<branch>
+git reset --hard <branch>
+```
+
+This gives users the full colocated experience in every worktree — `git status`,
+`jj log`, IDE integration, and jj operations all work.
+
+### Why the temp-move technique
+
+Neither `git worktree add` nor `jj workspace add` will write into a directory
+the other already created. The solution: create the jj workspace at a temp
+sibling path, then move just the `.jj/` directory into the git worktree. The
+relative `repo` path in `.jj/repo` stays valid because both paths are at the
+same directory level under the storage dir.
 
 ## Identity Model Tension
 
@@ -216,18 +231,21 @@ from any workspace with no swap, no stash, no hold branch. The `SwapStep` WAL
 enum, the `_wkm/hold/` namespace, and the stash-during-checkout logic all exist
 to work around a git limitation that jj simply doesn't have.
 
-However, since wkm creates git worktrees (not jj workspaces) for the colocated
-compatibility reasons above, the swap operation remains necessary in wkm even
-on colocated repos.
+With the `GitJj` backend (dual registration), `jj edit <bookmark>` + git HEAD
+sync replaces the swap operation for checkout. The 5-step swap is only needed
+in pure `Git` backend mode.
 
 ## File Map
 
 | File | Role |
 |------|------|
 | `wkm-core/src/repo.rs` | `VcsBackend` enum + detection |
-| `wkm-core/src/git/jj_cli.rs` | `JjCli` backend struct |
+| `wkm-core/src/git/jj_cli.rs` | `JjCli` backend struct, `sync_git_head()`, workspace helpers |
 | `wkm-core/src/git/mod.rs` | Module declarations |
 | `wkm-core/src/ops/sync/mod.rs` | Dispatcher + `sync_git()` |
-| `wkm-core/src/ops/sync/jj.rs` | `sync_jj()` implementation |
-| `wkm-core/src/state/types.rs` | `jj_op_id` in WAL |
+| `wkm-core/src/ops/sync/jj.rs` | `sync_jj()` + dual registration tests |
+| `wkm-core/src/ops/worktree.rs` | `create()` with dual registration, `setup_jj_workspace()` helper |
+| `wkm-core/src/ops/init.rs` | `--worktree-backend` option, auto-default for colocated |
+| `wkm-core/src/state/types.rs` | `WorktreeBackend` enum, `jj_workspace_name` in `BranchEntry`, `jj_op_id` in WAL |
 | `wkm-cli/src/backend.rs` | `with_backend!` macro |
+| `wkm-cli/src/commands/init.rs` | CLI `--worktree-backend` flag |

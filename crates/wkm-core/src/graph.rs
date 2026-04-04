@@ -139,6 +139,7 @@ mod tests {
             parent: parent.map(|s| s.to_string()),
             worktree_path: None,
             stash_commit: None,
+            jj_workspace_name: None,
             description: None,
             created_at: "2026-01-01T00:00:00Z".to_string(),
             previous_branch: None,
