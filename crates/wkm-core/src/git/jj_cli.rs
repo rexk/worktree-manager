@@ -69,6 +69,105 @@ impl JjCli {
     pub fn current_op_id(&self) -> Result<String> {
         self.jj_run_ok(&["op", "log", "--no-graph", "--limit=1", "-T", "self.id()"])
     }
+
+    /// Create a jj workspace at `path` with the given name, pointed at `revision`.
+    pub fn workspace_add(&self, path: &Path, name: &str, revision: &str) -> Result<()> {
+        let path_str = path
+            .to_str()
+            .ok_or_else(|| WkmError::Other(format!("non-UTF8 path: {}", path.display())))?;
+        self.jj_run_ok(&["workspace", "add", path_str, "--name", name, "-r", revision])?;
+        Ok(())
+    }
+
+    /// Forget (deregister) a jj workspace by name.
+    pub fn workspace_forget(&self, name: &str) -> Result<()> {
+        self.jj_run_ok(&["workspace", "forget", name])?;
+        Ok(())
+    }
+
+    /// Update a stale jj workspace's working copy.
+    pub fn workspace_update_stale(&self, worktree_path: &Path) -> Result<()> {
+        let output = self.jj_run_in(worktree_path, &["workspace", "update-stale"])?;
+        // update-stale returns success even if not stale ("not updated since ...")
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(WkmError::Git(format!(
+                "jj workspace update-stale failed: {}",
+                stderr.trim()
+            )));
+        }
+        Ok(())
+    }
+
+    /// Export jj state to git refs.
+    pub fn git_export(&self) -> Result<()> {
+        self.jj_run_ok(&["git", "export"])?;
+        Ok(())
+    }
+
+    /// Import git refs into jj.
+    pub fn git_import(&self) -> Result<()> {
+        // jj git import may report "Nothing changed." on stderr, which is fine
+        let output = self.jj_run_in(&self.work_dir, &["git", "import"])?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            // "Nothing changed." is not an error
+            if !stderr.contains("Nothing changed") {
+                return Err(WkmError::Git(format!(
+                    "jj git import failed: {}",
+                    stderr.trim()
+                )));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Sync git HEAD in a worktree to match a specific branch.
+///
+/// After jj operations that change the working copy (e.g. `jj edit`, `jj workspace update-stale`),
+/// git HEAD may be pointing at the wrong branch or be detached. This function:
+/// 1. Points HEAD at the correct branch ref via `git symbolic-ref`
+/// 2. Resets the git index and working tree to match via `git reset --hard`
+///
+/// Result: `git status` is clean, `git branch` shows the correct branch,
+/// and `git worktree list` shows `[branch]` instead of `(detached HEAD)`.
+pub fn sync_git_head(worktree_path: &Path, branch: &str) -> Result<()> {
+    let path_str = worktree_path
+        .to_str()
+        .ok_or_else(|| WkmError::Other(format!("non-UTF8 path: {}", worktree_path.display())))?;
+
+    // 1. Point HEAD at the correct branch
+    let status = Command::new("git")
+        .args([
+            "-C",
+            path_str,
+            "symbolic-ref",
+            "HEAD",
+            &format!("refs/heads/{branch}"),
+        ])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .status()
+        .map_err(|e| WkmError::Git(format!("failed to run git symbolic-ref: {e}")))?;
+    if !status.success() {
+        return Err(WkmError::Git(format!(
+            "git symbolic-ref HEAD refs/heads/{branch} failed"
+        )));
+    }
+
+    // 2. Update git index and working tree to match
+    let status = Command::new("git")
+        .args(["-C", path_str, "reset", "--hard", branch])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .status()
+        .map_err(|e| WkmError::Git(format!("failed to run git reset: {e}")))?;
+    if !status.success() {
+        return Err(WkmError::Git(format!("git reset --hard {branch} failed")));
+    }
+
+    Ok(())
 }
 
 // -- Trait implementations: delegate to inner CliGit by default --

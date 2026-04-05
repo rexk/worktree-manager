@@ -4,12 +4,14 @@ use crate::encoding;
 use crate::error::WkmError;
 use crate::repo::RepoContext;
 use crate::state;
-use crate::state::types::{WkmConfig, WkmState};
+use crate::state::types::{WkmConfig, WkmState, WorktreeBackend};
 
 /// Options for initializing wkm.
 pub struct InitOptions {
     pub base_branch: String,
     pub storage_dir: Option<PathBuf>,
+    /// Explicit worktree backend choice. If `None`, auto-detected from VCS backend.
+    pub worktree_backend: Option<WorktreeBackend>,
 }
 
 impl Default for InitOptions {
@@ -17,6 +19,7 @@ impl Default for InitOptions {
         Self {
             base_branch: "main".to_string(),
             storage_dir: None,
+            worktree_backend: None,
         }
     }
 }
@@ -38,8 +41,27 @@ pub fn init(ctx: &RepoContext, opts: &InitOptions) -> Result<WkmState, WkmError>
     // Resolve the storage directory with collision handling
     let storage_dir = resolve_storage_dir(ctx, opts)?;
 
+    // Determine worktree backend: explicit choice > auto-detect from VCS
+    let worktree_backend = opts.worktree_backend.unwrap_or(match ctx.vcs_backend {
+        crate::repo::VcsBackend::JjColocated => WorktreeBackend::GitJj,
+        crate::repo::VcsBackend::Git => WorktreeBackend::Git,
+    });
+
+    // Validate: GitJj and Jj require colocated jj+git
+    if matches!(
+        worktree_backend,
+        WorktreeBackend::GitJj | WorktreeBackend::Jj
+    ) && ctx.vcs_backend != crate::repo::VcsBackend::JjColocated
+    {
+        return Err(WkmError::Other(format!(
+            "worktree backend '{:?}' requires a colocated jj+git repository (no .jj/ found or jj not on PATH)",
+            worktree_backend
+        )));
+    }
+
     let mut config = WkmConfig::new(&opts.base_branch);
     config.storage_dir = Some(storage_dir.clone());
+    config.worktree_backend = worktree_backend;
     let new_state = WkmState::new(config);
 
     // Create storage directory
@@ -137,6 +159,7 @@ mod tests {
         let opts = InitOptions {
             base_branch: "develop".to_string(),
             storage_dir: None,
+            worktree_backend: None,
         };
         let state = init(&ctx, &opts).unwrap();
         assert_eq!(state.config.base_branch, "develop");
@@ -226,6 +249,7 @@ mod tests {
         let opts = InitOptions {
             base_branch: "main".to_string(),
             storage_dir: Some(custom_dir.path().to_path_buf()),
+            worktree_backend: None,
         };
         let state = init(&ctx, &opts).unwrap();
 

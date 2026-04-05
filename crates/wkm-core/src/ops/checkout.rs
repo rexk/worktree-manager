@@ -141,6 +141,7 @@ pub fn checkout_create(
                 .get(&current_branch)
                 .and_then(|e| e.worktree_path.clone()),
             stash_commit: None,
+            jj_workspace_name: None,
             description: None,
             created_at: now,
             previous_branch: Some(current_branch),
@@ -321,6 +322,7 @@ mod tests {
                 parent: Some("main".to_string()),
                 worktree_path: None,
                 stash_commit: None,
+                jj_workspace_name: None,
                 description: None,
                 created_at: "2026-01-01T00:00:00Z".to_string(),
                 previous_branch: None,

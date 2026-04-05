@@ -79,6 +79,7 @@ pub fn adopt(
                 parent: Some(parent_branch.clone()),
                 worktree_path,
                 stash_commit: None,
+                jj_workspace_name: None,
                 description: None,
                 created_at: now.clone(),
                 previous_branch: None,

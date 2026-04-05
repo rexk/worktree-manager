@@ -52,4 +52,4 @@ Tests use `wkm-sandbox::TestRepo` which creates a temporary bare repo + worktree
 
 ## Documentation
 
-`docs/SPEC.md` is the authoritative 48KB functional specification covering goals, workflows, and design decisions.
+`docs/SPEC.md` is the authoritative functional specification covering goals, workflows, design decisions, and jj (Jujutsu) integration (Appendix A).
