@@ -190,6 +190,23 @@ impl GitBranches for CliGit {
             Ok(None)
         }
     }
+
+    fn resolve_dwim_remote(&self, name: &str) -> Result<Option<String>> {
+        let remotes_out = self.run_ok(&["remote"])?;
+        let mut matches = Vec::new();
+        for remote in remotes_out.lines().filter(|l| !l.is_empty()) {
+            let ref_name = format!("refs/remotes/{remote}/{name}");
+            let output = self.run(&["rev-parse", "--verify", "--quiet", &ref_name])?;
+            if output.status.success() {
+                matches.push(format!("{remote}/{name}"));
+            }
+        }
+        if matches.len() == 1 {
+            Ok(Some(matches.remove(0)))
+        } else {
+            Ok(None)
+        }
+    }
 }
 
 impl GitWorktrees for CliGit {

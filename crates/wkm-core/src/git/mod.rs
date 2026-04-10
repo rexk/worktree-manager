@@ -27,6 +27,9 @@ pub trait GitBranches {
     fn is_ancestor(&self, ancestor: &str, descendant: &str) -> Result<bool>;
     fn ahead_behind(&self, a: &str, b: &str) -> Result<(usize, usize)>;
     fn remote_tracking_branch(&self, branch: &str) -> Result<Option<String>>;
+    /// Find a unique remote-tracking ref matching `name` across all remotes.
+    /// Returns `Some("<remote>/<name>")` if exactly one match exists, else `None`.
+    fn resolve_dwim_remote(&self, name: &str) -> Result<Option<String>>;
     fn branch_list(&self) -> Result<Vec<String>>;
 }
 

@@ -219,6 +219,10 @@ impl GitBranches for JjCli {
         self.inner.remote_tracking_branch(branch)
     }
 
+    fn resolve_dwim_remote(&self, name: &str) -> Result<Option<String>> {
+        self.inner.resolve_dwim_remote(name)
+    }
+
     fn branch_list(&self) -> Result<Vec<String>> {
         self.inner.branch_list()
     }
