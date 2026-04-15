@@ -36,10 +36,33 @@ pub fn checkout(
         return Ok(());
     }
 
-    // Check target branch exists
-    if !git.branch_exists(target_branch)? {
-        return Err(WkmError::BranchNotFound(target_branch.to_string()));
-    }
+    // Check target branch exists; if not, try DWIM against remote-tracking refs
+    // (mirrors `git checkout <branch>` behavior).
+    let _dwim_created = if !git.branch_exists(target_branch)? {
+        match git.resolve_dwim_remote(target_branch)? {
+            Some(remote_ref) => {
+                // `git branch <name> <remote>/<name>` auto-configures upstream tracking.
+                git.create_branch(target_branch, &remote_ref)?;
+                let now = chrono::Utc::now().to_rfc3339();
+                wkm_state.branches.insert(
+                    target_branch.to_string(),
+                    BranchEntry {
+                        parent: None,
+                        worktree_path: None,
+                        stash_commit: None,
+                        jj_workspace_name: None,
+                        description: None,
+                        created_at: now,
+                        previous_branch: Some(current_branch.clone()),
+                    },
+                );
+                true
+            }
+            None => return Err(WkmError::BranchNotFound(target_branch.to_string())),
+        }
+    } else {
+        false
+    };
 
     // Check if target is checked out in another worktree
     let worktrees = git.worktree_list()?;
@@ -582,5 +605,44 @@ mod tests {
         _repo.create_branch("feature");
         let result = checkout(&ctx, &git, _repo.path(), "feature", false);
         assert!(matches!(result, Err(WkmError::OperationInProgress)));
+    }
+
+    #[test]
+    fn checkout_dwim_creates_local_tracking_branch() {
+        let (repo, ctx, git) = {
+            let mut repo = TestRepo::new();
+            let _remote_path = repo.with_remote();
+            let ctx = RepoContext::from_path(repo.path()).unwrap();
+            let git = CliGit::new(repo.path());
+            init::init(&ctx, &InitOptions::default()).unwrap();
+            (repo, ctx, git)
+        };
+
+        // Create a branch, push to remote, then delete local copy.
+        repo.create_branch("remote-only");
+        wkm_sandbox::git(repo.path(), &["push", "origin", "remote-only"]);
+        wkm_sandbox::git(repo.path(), &["checkout", "main"]);
+        wkm_sandbox::git(repo.path(), &["branch", "-D", "remote-only"]);
+
+        // Sanity: local branch gone, remote-tracking ref present.
+        assert!(!git.branch_exists("remote-only").unwrap());
+
+        // wkm checkout should DWIM and create local tracking branch.
+        checkout(&ctx, &git, repo.path(), "remote-only", false).unwrap();
+
+        assert!(git.branch_exists("remote-only").unwrap());
+        assert_eq!(
+            git.current_branch(repo.path()).unwrap(),
+            Some("remote-only".to_string())
+        );
+        // Upstream tracking should be configured.
+        assert_eq!(
+            git.remote_tracking_branch("remote-only").unwrap(),
+            Some("origin/remote-only".to_string())
+        );
+        // State should contain the new entry.
+        let wkm_state = state::read_state(&ctx.state_path).unwrap().unwrap();
+        assert!(wkm_state.branches.contains_key("remote-only"));
+        assert_eq!(wkm_state.branches["remote-only"].parent, None);
     }
 }
