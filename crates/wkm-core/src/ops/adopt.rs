@@ -71,7 +71,8 @@ pub fn adopt(
         let worktree_path = worktrees
             .iter()
             .find(|wt| wt.branch.as_deref() == Some(branch.as_str()))
-            .map(|wt| wt.path.clone());
+            .map(|wt| wt.path.clone())
+            .filter(|p| p != &ctx.main_worktree);
 
         wkm_state.branches.insert(
             branch.clone(),
@@ -184,6 +185,23 @@ mod tests {
         wkm_sandbox::git(
             repo.path(),
             &["worktree", "remove", wt_path.to_str().unwrap()],
+        );
+    }
+
+    #[test]
+    fn adopt_branch_in_main_worktree_has_no_worktree_path() {
+        // A branch currently checked out in the main worktree is not a
+        // wkm-managed worktree — its state entry must have worktree_path = None.
+        let (repo, ctx, git) = setup();
+        repo.create_branch("hosted-in-main");
+        wkm_sandbox::git(repo.path(), &["checkout", "hosted-in-main"]);
+
+        adopt(&ctx, &git, &["hosted-in-main".to_string()], None, false).unwrap();
+
+        let wkm_state = state::read_state(&ctx.state_path).unwrap().unwrap();
+        assert_eq!(
+            wkm_state.branches["hosted-in-main"].worktree_path, None,
+            "branch in main worktree must not record main worktree as its worktree_path"
         );
     }
 

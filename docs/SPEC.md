@@ -98,7 +98,7 @@ A structured file (JSON or TOML, implementation decision) stored at `.git/wkm.{j
 **Contents:**
 - **Version field** for schema migration.
 - Branch parent-child relationships.
-- Worktree paths for each tracked branch.
+- Worktree paths for tracked branches **that have a dedicated secondary worktree**. Branches checked out in the main worktree carry no worktree path in state — main-worktree hosting is inferred at runtime via `git worktree list` (see invariant below).
 - Latest checkout-swap stash hashes for each branch (persists after successful swap until applied or cleared).
 - **Global configuration overrides** (sync/merge strategy, naming convention, branch prefix).
 - Creation timestamps.
@@ -117,6 +117,11 @@ A structured file (JSON or TOML, implementation decision) stored at `.git/wkm.{j
 - The CLI is the sole reader/writer.
 - All commands auto-detect the main worktree (via `git worktree list`) regardless of which worktree they're run from.
 - Commands do not pre-validate full state consistency. If a git operation fails due to state drift (e.g., branch deleted outside wkm), the error is surfaced with a suggestion to run `wkm repair`.
+
+**Invariants:**
+- `BranchEntry.worktree_path` is `Some(path)` **only** when the branch is checked out in a secondary worktree. It is never set to the main worktree path.
+- The base branch's main-worktree association is a special case in `wkm wp`/`cd_path`. For any other branch that happens to be hosted in the main worktree, main-worktree hosting is detected at runtime via `git worktree list` rather than stored.
+- `wkm repair` enforces these invariants: it clears any `worktree_path` pointing at the main worktree, and clears `worktree_path` for any branch not present in `git worktree list` (stale entry from a prior checkout).
 
 ### 5.4 Temporary Branch Namespace
 
@@ -289,10 +294,10 @@ Set via `wkm init --worktree-backend git|git-jj|jj`. Changing backend with exist
 
 | Command | Purpose |
 |---------|---------|
-| `wkm list [--json]` | Show all tracked branches with: location (main worktree / linked worktree path / local-only), parent branch, state signals (clean/dirty, ahead/behind parent, ahead/behind remote, **stashed changes pending**). `--json` for structured output. |
+| `wkm list [--json]` | Show all tracked branches with: location (linked worktree path if any; main-worktree hosting is reported via `wkm status`/`wkm wp` at runtime rather than stored in state), parent branch, state signals (clean/dirty, ahead/behind parent, ahead/behind remote, **stashed changes pending**). `--json` for structured output. |
 | `wkm graph` | ASCII branch dependency tree annotated with worktree locations and state signals. |
 | `wkm status [<branch>]` | Detailed state for a branch: clean/dirty, ahead/behind parent, ahead/behind remote, merge-ready/conflicted, **stashed changes pending**. Also reports any in-progress operations (sync/merge), including the absolute path to any temporary worktree used for the operation. |
-| `wkm wp <branch>` | Output the worktree path for shell navigation (alias for `worktree-path`). If the branch is in a worktree (main or linked), output that path. If the branch has no worktree, error with suggestions (`wkm worktree create <branch>` or `wkm checkout <branch>`). |
+| `wkm wp <branch>` | Output the worktree path for shell navigation (alias for `worktree-path`). If the branch is in a worktree (main or linked), output that path. Main-worktree hosting is detected via `git worktree list` rather than stored in state. If the branch has no worktree, error with suggestions (`wkm worktree create <branch>` or `wkm checkout <branch>`). |
 
 ### 7.3 Maintenance
 
@@ -301,7 +306,7 @@ Set via `wkm init --worktree-backend git|git-jj|jj`. Changing backend with exist
 | `wkm config get <key>` | Get a config value. |
 | `wkm config set <key> <value>` | Set a config value. Keys: `base_branch`, `merge_strategy`, `naming_strategy`, `prefix`, `max_branch_length`, `storage_dir`. |
 | `wkm config list` | List all config values for the current repo. |
-| `wkm repair` | Reconcile wkm state with actual filesystem and git state. Runs `git worktree repair` and `git worktree prune` to fix git-level issues. Removes stale state entries for deleted worktrees and branches that no longer exist in the git repository. Cleans up orphaned `_wkm/*` branches. Detects and warns about manually created `_wkm` branches that conflict with the namespace. Cleans up stale `wkm:`-prefixed stash entries (scans `git stash list`, drops entries whose hashes are no longer referenced by any active WAL entry **OR** branch metadata in state, and have been created more than 24 hours ago). Recovers or rolls back incomplete operations using the write-ahead log. |
+| `wkm repair` | Reconcile wkm state with actual filesystem and git state. Runs `git worktree repair` and `git worktree prune` to fix git-level issues. Removes stale state entries for deleted worktrees and branches that no longer exist in the git repository. Reconciles `worktree_path` for tracked branches against `git worktree list`: clears any `worktree_path` pointing at the main worktree (violates the §5.3 invariant) and any `worktree_path` for a branch not currently in `git worktree list` (stale entry from a prior checkout). Cleans up orphaned `_wkm/*` branches. Detects and warns about manually created `_wkm` branches that conflict with the namespace. Cleans up stale `wkm:`-prefixed stash entries (scans `git stash list`, drops entries whose hashes are no longer referenced by any active WAL entry **OR** branch metadata in state, and have been created more than 24 hours ago). Recovers or rolls back incomplete operations using the write-ahead log. |
 
 ### 7.4 Stash Management
 
