@@ -133,7 +133,7 @@ wkm works entirely with your local git repo. There is no server, no account, and
 
 ## How It Works
 
-- **State file**: `.git/wkm.toml` stores branch entries (parent, worktree path, stash commit, metadata) with schema versioning.
+- **State file**: `.git/wkm.toml` stores branch entries (parent, secondary worktree path if any, stash commit, metadata) with schema versioning. Branches hosted in the main worktree don't carry a stored worktree path — main-worktree hosting is inferred at runtime via `git worktree list`.
 - **Worktree storage**: Worktrees are created under `~/.local/share/wkm/` by default (configurable via `WKM_DATA_DIR` or per-repo config). The directory is named after the repo so your terminal prompt stays meaningful.
 - **Git interaction**: wkm shells out to the `git` CLI for all git operations — no libgit2 dependency.
 - **Architecture**: Three crates — `wkm-core` (business logic), `wkm-cli` (Clap wrapper), `wkm-sandbox` (test fixtures).

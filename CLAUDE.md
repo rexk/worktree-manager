@@ -39,7 +39,7 @@ cargo run -p wkm-cli -- <command>    # Run the CLI
 ### Key Design Decisions
 
 - **Git CLI shell-out** (not libgit2) for compatibility and simplicity.
-- **State file**: `.git/wkm.toml` stores branch entries (parent, worktree path, stash commit, metadata) with schema versioning.
+- **State file**: `.git/wkm.toml` stores branch entries (parent, secondary worktree path if any, stash commit, metadata) with schema versioning. **Invariant**: `BranchEntry.worktree_path` is recorded only for secondary worktrees — it is never set to the main worktree path. Main-worktree hosting is inferred at runtime via `git worktree list`. `wkm repair` enforces this invariant.
 - **Atomic state writes**: tempfile + rename to prevent corruption.
 - **WAL**: write-ahead log entries allow crash recovery of multi-step operations.
 - **Swap operation** in checkout: moves a checked-out branch between worktrees.

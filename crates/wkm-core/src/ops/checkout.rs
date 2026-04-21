@@ -162,7 +162,8 @@ pub fn checkout_create(
             worktree_path: wkm_state
                 .branches
                 .get(&current_branch)
-                .and_then(|e| e.worktree_path.clone()),
+                .and_then(|e| e.worktree_path.clone())
+                .filter(|p| p != &ctx.main_worktree),
             stash_commit: None,
             jj_workspace_name: None,
             description: None,
@@ -279,19 +280,27 @@ fn swap_checkout(
     // Clean up hold branch
     let _ = git.delete_branch(&hold_branch, true);
 
-    // Update state
+    // Update state to reflect the swap. worktree_path tracks the SECONDARY
+    // worktree only — if a branch's new location is the main worktree, store None.
+    let source_new_path = if target_wt == ctx.main_worktree {
+        None
+    } else {
+        Some(target_wt.to_path_buf())
+    };
+    let target_new_path = if source_wt == ctx.main_worktree {
+        None
+    } else {
+        Some(source_wt.to_path_buf())
+    };
+
     if let Some(entry) = wkm_state.branches.get_mut(source_branch) {
         entry.stash_commit = None;
-        if entry.worktree_path.as_ref() == Some(&source_wt.to_path_buf()) {
-            entry.worktree_path = Some(target_wt.to_path_buf());
-        }
+        entry.worktree_path = source_new_path;
     }
     if let Some(entry) = wkm_state.branches.get_mut(target_branch) {
         entry.stash_commit = None;
         entry.previous_branch = Some(source_branch.to_string());
-        if entry.worktree_path.as_ref() == Some(&target_wt.to_path_buf()) {
-            entry.worktree_path = Some(source_wt.to_path_buf());
-        }
+        entry.worktree_path = target_new_path;
     }
 
     // Clear WAL
@@ -385,6 +394,40 @@ mod tests {
         assert_eq!(
             wkm_state.branches["new-feature"].parent,
             Some("main".to_string())
+        );
+    }
+
+    #[test]
+    fn checkout_create_does_not_inherit_main_worktree_path() {
+        // If the current branch's entry has a (stale) worktree_path pointing
+        // at the main worktree, a new branch created via `wkm checkout -b`
+        // must NOT inherit it — the invariant is that main_worktree is never
+        // stored in worktree_path.
+        let (repo, ctx, git) = setup();
+
+        // Simulate a stale state: current branch ("main") has worktree_path
+        // set to the main worktree (as could have happened pre-fix).
+        let mut wkm_state = state::read_state(&ctx.state_path).unwrap().unwrap();
+        wkm_state.branches.insert(
+            "main".to_string(),
+            BranchEntry {
+                parent: None,
+                worktree_path: Some(ctx.main_worktree.clone()),
+                stash_commit: None,
+                jj_workspace_name: None,
+                description: None,
+                created_at: "2026-01-01T00:00:00Z".to_string(),
+                previous_branch: None,
+            },
+        );
+        state::write_state(&ctx.state_path, &wkm_state).unwrap();
+
+        checkout_create(&ctx, &git, repo.path(), "new-feature", None).unwrap();
+
+        let wkm_state = state::read_state(&ctx.state_path).unwrap().unwrap();
+        assert_eq!(
+            wkm_state.branches["new-feature"].worktree_path, None,
+            "new branch must not inherit main_worktree as worktree_path"
         );
     }
 

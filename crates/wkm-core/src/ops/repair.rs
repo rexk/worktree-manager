@@ -81,25 +81,34 @@ pub fn repair(
         }
     }
 
-    // 5. Reconcile worktree_path for tracked branches against git worktree list
+    // 5. Reconcile worktree_path for tracked branches against git worktree list.
+    // The main worktree is not a wkm-managed worktree: branches checked out there
+    // must have worktree_path = None (main-worktree membership is inferred at runtime).
     let worktrees = git.worktree_list()?;
     for (name, entry) in wkm_state.branches.iter_mut() {
         let actual_wt = worktrees
             .iter()
-            .find(|wt| wt.branch.as_deref() == Some(name.as_str()));
+            .find(|wt| wt.branch.as_deref() == Some(name.as_str()))
+            .filter(|wt| wt.path != ctx.main_worktree);
         match (actual_wt, &entry.worktree_path) {
-            // Branch is in a worktree but state doesn't know about it
+            // Branch is in a secondary worktree but state doesn't know about it
             (Some(wt), None) => {
                 entry.worktree_path = Some(wt.path.clone());
                 result.worktree_paths_updated.push(name.clone());
             }
-            // Branch is in a different worktree than state thinks
+            // Branch is in a different secondary worktree than state thinks
             (Some(wt), Some(existing)) if *existing != wt.path => {
                 entry.worktree_path = Some(wt.path.clone());
                 result.worktree_paths_updated.push(name.clone());
             }
-            // Branch is NOT in any worktree but state has a path (already handled by step 4)
-            // Or state matches reality — nothing to do
+            // Branch is NOT in any secondary worktree but state has a path —
+            // stale entry (often `Some(main_worktree)` left over from a past
+            // check-out, or a path that happens to still exist on disk).
+            (None, Some(_)) => {
+                entry.worktree_path = None;
+                result.worktree_paths_cleared.push(name.clone());
+            }
+            // State matches reality — nothing to do
             _ => {}
         }
     }
@@ -116,11 +125,18 @@ pub fn repair(
             {
                 continue;
             }
+            // Only record a worktree_path for secondary worktrees — a branch
+            // sitting in the main worktree is tracked without a stored path.
+            let worktree_path = if wt.path == ctx.main_worktree {
+                None
+            } else {
+                Some(wt.path.clone())
+            };
             wkm_state.branches.insert(
                 branch.clone(),
                 crate::state::types::BranchEntry {
                     parent: Some(base_branch.clone()),
-                    worktree_path: Some(wt.path.clone()),
+                    worktree_path,
                     stash_commit: None,
                     jj_workspace_name: None,
                     description: None,
@@ -509,6 +525,97 @@ mod tests {
         wkm_sandbox::git(
             repo.path(),
             &["worktree", "remove", wt_path.to_str().unwrap()],
+        );
+    }
+
+    #[test]
+    fn repair_clears_stale_main_worktree_path() {
+        // A branch whose state has worktree_path = Some(main_worktree) but is
+        // not currently checked out anywhere is stale. Repair must clear it.
+        let (repo, ctx, git) = setup();
+        repo.create_branch("stale-main-ref");
+
+        let mut wkm_state = state::read_state(&ctx.state_path).unwrap().unwrap();
+        wkm_state.branches.insert(
+            "stale-main-ref".to_string(),
+            BranchEntry {
+                parent: Some("main".to_string()),
+                worktree_path: Some(ctx.main_worktree.clone()),
+                stash_commit: None,
+                jj_workspace_name: None,
+                description: None,
+                created_at: "2026-01-01T00:00:00Z".to_string(),
+                previous_branch: None,
+            },
+        );
+        state::write_state(&ctx.state_path, &wkm_state).unwrap();
+
+        let result = repair(&ctx, &git).unwrap();
+        assert!(
+            result
+                .worktree_paths_cleared
+                .contains(&"stale-main-ref".to_string()),
+            "repair should clear stale main-worktree path, got: {:?}",
+            result.worktree_paths_cleared
+        );
+
+        let wkm_state = state::read_state(&ctx.state_path).unwrap().unwrap();
+        assert_eq!(wkm_state.branches["stale-main-ref"].worktree_path, None);
+    }
+
+    #[test]
+    fn repair_clears_main_worktree_path_for_currently_hosted_branch() {
+        // Even the branch CURRENTLY checked out in the main worktree must not
+        // have worktree_path = Some(main_worktree) in state — main-worktree
+        // hosting is inferred at runtime, not stored.
+        let (repo, ctx, git) = setup();
+        repo.create_branch("hosted");
+        wkm_sandbox::git(repo.path(), &["checkout", "hosted"]);
+
+        let mut wkm_state = state::read_state(&ctx.state_path).unwrap().unwrap();
+        wkm_state.branches.insert(
+            "hosted".to_string(),
+            BranchEntry {
+                parent: Some("main".to_string()),
+                worktree_path: Some(ctx.main_worktree.clone()),
+                stash_commit: None,
+                jj_workspace_name: None,
+                description: None,
+                created_at: "2026-01-01T00:00:00Z".to_string(),
+                previous_branch: None,
+            },
+        );
+        state::write_state(&ctx.state_path, &wkm_state).unwrap();
+
+        repair(&ctx, &git).unwrap();
+
+        let wkm_state = state::read_state(&ctx.state_path).unwrap().unwrap();
+        assert_eq!(
+            wkm_state.branches["hosted"].worktree_path, None,
+            "worktree_path must never equal main_worktree, even for the currently-hosted branch"
+        );
+    }
+
+    #[test]
+    fn repair_auto_adopt_skips_main_worktree_path() {
+        // Auto-adopting an untracked branch that lives in the main worktree
+        // must not record main_worktree as its worktree_path.
+        let (repo, ctx, git) = setup();
+        repo.create_branch("untracked-in-main");
+        wkm_sandbox::git(repo.path(), &["checkout", "untracked-in-main"]);
+
+        let result = repair(&ctx, &git).unwrap();
+        assert!(
+            result
+                .branches_adopted
+                .contains(&"untracked-in-main".to_string()),
+            "repair should auto-adopt the untracked branch"
+        );
+
+        let wkm_state = state::read_state(&ctx.state_path).unwrap().unwrap();
+        assert_eq!(
+            wkm_state.branches["untracked-in-main"].worktree_path, None,
+            "auto-adopted main-worktree branch must have worktree_path = None"
         );
     }
 

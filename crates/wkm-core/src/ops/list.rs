@@ -56,11 +56,21 @@ pub fn list(
 ///
 /// Returns an error if the branch is not tracked, has no worktree assigned,
 /// or the worktree directory no longer exists on disk.
-pub fn cd_path(ctx: &RepoContext, branch: &str) -> Result<PathBuf, WkmError> {
+pub fn cd_path(
+    ctx: &RepoContext,
+    git: &impl GitDiscovery,
+    branch: &str,
+) -> Result<PathBuf, WkmError> {
     let wkm_state = state::read_state(&ctx.state_path)?.ok_or(WkmError::NotInitialized)?;
 
     // Check if it's the base branch (main worktree)
     if branch == wkm_state.config.base_branch {
+        return Ok(ctx.main_worktree.clone());
+    }
+
+    // Any branch currently checked out in the main worktree lives there at
+    // runtime — main-worktree hosting is inferred from git, not stored in state.
+    if git.current_branch(&ctx.main_worktree)?.as_deref() == Some(branch) {
         return Ok(ctx.main_worktree.clone());
     }
 
@@ -149,7 +159,7 @@ mod tests {
 
     #[test]
     fn cd_returns_path() {
-        let (repo, ctx, _git) = setup();
+        let (repo, ctx, git) = setup();
 
         let wt_path = repo.path().join("feature-wt");
         std::fs::create_dir_all(&wt_path).unwrap();
@@ -169,20 +179,20 @@ mod tests {
         );
         state::write_state(&ctx.state_path, &wkm_state).unwrap();
 
-        let path = cd_path(&ctx, "feature").unwrap();
+        let path = cd_path(&ctx, &git, "feature").unwrap();
         assert_eq!(path, wt_path);
     }
 
     #[test]
     fn cd_base_branch_returns_main_worktree() {
-        let (_repo, ctx, _git) = setup();
-        let path = cd_path(&ctx, "main").unwrap();
+        let (_repo, ctx, git) = setup();
+        let path = cd_path(&ctx, &git, "main").unwrap();
         assert_eq!(path, ctx.main_worktree);
     }
 
     #[test]
     fn cd_path_missing_directory_errors() {
-        let (_repo, ctx, _git) = setup();
+        let (_repo, ctx, git) = setup();
 
         let mut wkm_state = state::read_state(&ctx.state_path).unwrap().unwrap();
         wkm_state.branches.insert(
@@ -199,7 +209,7 @@ mod tests {
         );
         state::write_state(&ctx.state_path, &wkm_state).unwrap();
 
-        let result = cd_path(&ctx, "feature");
+        let result = cd_path(&ctx, &git, "feature");
         assert!(
             matches!(result, Err(WkmError::WorktreePathMissing(ref b, _)) if b == "feature"),
             "expected WorktreePathMissing, got: {result:?}"
@@ -208,7 +218,7 @@ mod tests {
 
     #[test]
     fn cd_path_with_slash_in_branch_name() {
-        let (repo, ctx, _git) = setup();
+        let (repo, ctx, git) = setup();
 
         let wt_path = repo.path().join("cursor-wt");
         std::fs::create_dir_all(&wt_path).unwrap();
@@ -228,13 +238,13 @@ mod tests {
         );
         state::write_state(&ctx.state_path, &wkm_state).unwrap();
 
-        let path = cd_path(&ctx, "cursor/build-cache-cleanup-8644").unwrap();
+        let path = cd_path(&ctx, &git, "cursor/build-cache-cleanup-8644").unwrap();
         assert_eq!(path, wt_path);
     }
 
     #[test]
     fn cd_path_existing_directory_succeeds() {
-        let (repo, ctx, _git) = setup();
+        let (repo, ctx, git) = setup();
 
         let wt_path = repo.path().join("feature-wt");
         std::fs::create_dir_all(&wt_path).unwrap();
@@ -254,13 +264,18 @@ mod tests {
         );
         state::write_state(&ctx.state_path, &wkm_state).unwrap();
 
-        let path = cd_path(&ctx, "feature").unwrap();
+        let path = cd_path(&ctx, &git, "feature").unwrap();
         assert_eq!(path, wt_path);
     }
 
     #[test]
     fn cd_no_worktree_errors() {
-        let (_repo, ctx, _git) = setup();
+        let (repo, ctx, git) = setup();
+
+        // Create and checkout a different branch so `feature` is not hosted
+        // in the main worktree — otherwise the runtime fallback would match.
+        repo.create_branch("other");
+        wkm_sandbox::git(repo.path(), &["checkout", "other"]);
 
         let mut wkm_state = state::read_state(&ctx.state_path).unwrap().unwrap();
         wkm_state.branches.insert(
@@ -277,7 +292,36 @@ mod tests {
         );
         state::write_state(&ctx.state_path, &wkm_state).unwrap();
 
-        let result = cd_path(&ctx, "feature");
+        let result = cd_path(&ctx, &git, "feature");
         assert!(matches!(result, Err(WkmError::NoWorktree(_))));
+    }
+
+    #[test]
+    fn cd_path_returns_main_for_branch_in_main_worktree() {
+        let (repo, ctx, git) = setup();
+
+        // Create a branch and check it out in the main worktree.
+        repo.create_branch("hosted-in-main");
+        wkm_sandbox::git(repo.path(), &["checkout", "hosted-in-main"]);
+
+        // Tracked without a stored worktree_path (the new invariant).
+        let mut wkm_state = state::read_state(&ctx.state_path).unwrap().unwrap();
+        wkm_state.branches.insert(
+            "hosted-in-main".to_string(),
+            BranchEntry {
+                parent: Some("main".to_string()),
+                worktree_path: None,
+                stash_commit: None,
+                jj_workspace_name: None,
+                description: None,
+                created_at: "2026-01-01T00:00:00Z".to_string(),
+                previous_branch: None,
+            },
+        );
+        state::write_state(&ctx.state_path, &wkm_state).unwrap();
+
+        // cd_path infers main-worktree hosting at runtime.
+        let path = cd_path(&ctx, &git, "hosted-in-main").unwrap();
+        assert_eq!(path, ctx.main_worktree);
     }
 }

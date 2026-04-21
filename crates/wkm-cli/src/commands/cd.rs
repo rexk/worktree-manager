@@ -20,14 +20,16 @@ pub fn run(args: &CdArgs, hint: bool) -> anyhow::Result<()> {
         None => pick_branch_with_worktree(&ctx)?,
     };
 
-    let path = list::cd_path(&ctx, &branch)?;
-    println!("{}", path.display());
-    if hint && std::env::var("WKM_SHELL_SETUP").is_err() {
-        eprintln!(
-            "hint: run 'eval \"$(wkm shell-setup)\"' or use 'cd \"$(wkm worktree-path {branch})\"'",
-        );
-    }
-    Ok(())
+    with_backend!(ctx, &cwd, git => {
+        let path = list::cd_path(&ctx, &git, &branch)?;
+        println!("{}", path.display());
+        if hint && std::env::var("WKM_SHELL_SETUP").is_err() {
+            eprintln!(
+                "hint: run 'eval \"$(wkm shell-setup)\"' or use 'cd \"$(wkm worktree-path {branch})\"'",
+            );
+        }
+        Ok(())
+    })
 }
 
 fn pick_branch_with_worktree(ctx: &RepoContext) -> anyhow::Result<String> {
