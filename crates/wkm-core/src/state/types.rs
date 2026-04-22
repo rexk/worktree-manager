@@ -10,6 +10,8 @@ pub struct WkmState {
     pub config: WkmConfig,
     #[serde(default)]
     pub branches: BTreeMap<String, BranchEntry>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub workspaces: BTreeMap<String, WorkspaceEntry>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub wal: Option<WalEntry>,
 }
@@ -17,9 +19,10 @@ pub struct WkmState {
 impl WkmState {
     pub fn new(config: WkmConfig) -> Self {
         Self {
-            version: 1,
+            version: 2,
             config,
             branches: BTreeMap::new(),
+            workspaces: BTreeMap::new(),
             wal: None,
         }
     }
@@ -109,6 +112,18 @@ pub enum WorktreeBackend {
     Jj,
 }
 
+/// A workspace alias entry. The alias points at a secondary worktree
+/// directory. Aliases survive branch lifecycles (merge parks the worktree
+/// under `_wkm/parked/<alias>` rather than destroying it).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkspaceEntry {
+    /// Absolute path to a secondary worktree. Never equals the main worktree.
+    pub worktree_path: PathBuf,
+    pub created_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
 /// A tracked branch entry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BranchEntry {
@@ -196,10 +211,44 @@ mod tests {
         let state = WkmState::new(WkmConfig::new("main"));
         let toml_str = toml::to_string_pretty(&state).unwrap();
         let parsed: WkmState = toml::from_str(&toml_str).unwrap();
-        assert_eq!(parsed.version, 1);
+        assert_eq!(parsed.version, 2);
         assert_eq!(parsed.config.base_branch, "main");
         assert!(parsed.branches.is_empty());
+        assert!(parsed.workspaces.is_empty());
         assert!(parsed.wal.is_none());
+    }
+
+    #[test]
+    fn state_roundtrip_with_workspaces() {
+        let mut state = WkmState::new(WkmConfig::new("main"));
+        state.workspaces.insert(
+            "specs".to_string(),
+            WorkspaceEntry {
+                worktree_path: "/tmp/specs-wt".into(),
+                created_at: "2026-01-01T00:00:00Z".to_string(),
+                description: Some("spec iterations".to_string()),
+            },
+        );
+        let toml_str = toml::to_string_pretty(&state).unwrap();
+        let parsed: WkmState = toml::from_str(&toml_str).unwrap();
+        assert_eq!(parsed.workspaces.len(), 1);
+        assert_eq!(
+            parsed.workspaces["specs"].worktree_path,
+            PathBuf::from("/tmp/specs-wt")
+        );
+    }
+
+    #[test]
+    fn state_deserializes_without_workspaces_field() {
+        // Existing state files (version 1) have no `workspaces` field — ensure
+        // they still deserialize successfully.
+        let toml_str = r#"
+            version = 1
+            [config]
+            base_branch = "main"
+        "#;
+        let parsed: WkmState = toml::from_str(toml_str).unwrap();
+        assert!(parsed.workspaces.is_empty());
     }
 
     #[test]

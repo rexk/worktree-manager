@@ -21,12 +21,18 @@ pub enum StashCommands {
     /// Apply a branch's stash
     Apply {
         /// Branch whose stash to apply
-        branch: String,
+        branch: Option<String>,
+        /// Apply the stash of the branch currently in the named workspace
+        #[arg(short = 'w', long = "workspace", conflicts_with = "branch")]
+        workspace: Option<String>,
     },
     /// Drop a branch's stash from state
     Drop {
         /// Branch whose stash to drop
-        branch: String,
+        branch: Option<String>,
+        /// Drop the stash of the branch currently in the named workspace
+        #[arg(short = 'w', long = "workspace", conflicts_with = "branch")]
+        workspace: Option<String>,
     },
 }
 
@@ -46,15 +52,30 @@ pub fn run(args: &StashArgs) -> anyhow::Result<()> {
                     }
                 }
             }
-            StashCommands::Apply { branch } => {
-                stash::apply(&ctx, &git, branch, &cwd)?;
+            StashCommands::Apply { branch, workspace } => {
+                let branch = resolve_branch(&ctx, &git, branch.as_deref(), workspace.as_deref())?;
+                stash::apply(&ctx, &git, &branch, &cwd)?;
                 println!("Applied stash for '{branch}'.");
             }
-            StashCommands::Drop { branch } => {
-                stash::drop(&ctx, branch)?;
+            StashCommands::Drop { branch, workspace } => {
+                let branch = resolve_branch(&ctx, &git, branch.as_deref(), workspace.as_deref())?;
+                stash::drop(&ctx, &branch)?;
                 println!("Dropped stash for '{branch}'.");
             }
         }
         Ok(())
     })
+}
+
+fn resolve_branch(
+    ctx: &wkm_core::repo::RepoContext,
+    git: &impl wkm_core::git::GitDiscovery,
+    branch: Option<&str>,
+    workspace: Option<&str>,
+) -> anyhow::Result<String> {
+    match (branch, workspace) {
+        (Some(b), _) => Ok(b.to_string()),
+        (None, Some(alias)) => Ok(wkm_core::ops::list::branch_for_workspace(ctx, git, alias)?),
+        (None, None) => anyhow::bail!("Specify a branch or use -w <workspace>"),
+    }
 }

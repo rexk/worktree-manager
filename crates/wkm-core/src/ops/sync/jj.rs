@@ -476,6 +476,7 @@ mod tests {
                 branch: "feature".to_string(),
                 base: None,
                 description: None,
+                name: None,
             },
         )
         .unwrap();
@@ -529,6 +530,7 @@ mod tests {
                 branch: "feature".to_string(),
                 base: None,
                 description: None,
+                name: None,
             },
         )
         .unwrap();
@@ -604,6 +606,7 @@ mod tests {
                 branch: "feature".to_string(),
                 base: None,
                 description: None,
+                name: None,
             },
         );
         assert!(
@@ -662,6 +665,7 @@ mod tests {
                 branch: "feature".to_string(),
                 base: None,
                 description: None,
+                name: None,
             },
         )
         .unwrap();
@@ -705,6 +709,7 @@ mod tests {
                 branch: "feature".to_string(),
                 base: None,
                 description: None,
+                name: None,
             },
         )
         .unwrap();
@@ -735,6 +740,7 @@ mod tests {
                 branch: "feature".to_string(),
                 base: None,
                 description: None,
+                name: None,
             },
         )
         .unwrap();
@@ -768,6 +774,7 @@ mod tests {
                 branch: "feature".to_string(),
                 base: None,
                 description: None,
+                name: None,
             },
         )
         .unwrap();
@@ -797,6 +804,7 @@ mod tests {
                 branch: "feature".to_string(),
                 base: None,
                 description: None,
+                name: None,
             },
         )
         .unwrap();
@@ -830,6 +838,7 @@ mod tests {
                 branch: "feature".to_string(),
                 base: None,
                 description: None,
+                name: None,
             },
         )
         .unwrap();
@@ -863,6 +872,7 @@ mod tests {
                 branch: "feature".to_string(),
                 base: None,
                 description: None,
+                name: None,
             },
         )
         .unwrap();
@@ -914,6 +924,7 @@ mod tests {
                 branch: "feature".to_string(),
                 base: None,
                 description: None,
+                name: None,
             },
         )
         .unwrap();
@@ -976,6 +987,7 @@ mod tests {
                 branch: "feature".to_string(),
                 base: None,
                 description: None,
+                name: None,
             },
         )
         .unwrap();

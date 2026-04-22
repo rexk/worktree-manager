@@ -10,6 +10,9 @@ use crate::ui;
 pub struct DropArgs {
     /// Branch to drop from wkm tracking
     pub branch: Option<String>,
+    /// Drop the branch currently hosted in the named workspace
+    #[arg(short = 'w', long = "workspace", conflicts_with = "branch")]
+    pub workspace: Option<String>,
     /// Also delete the git branch
     #[arg(short = 'D', long)]
     pub delete: bool,
@@ -23,9 +26,13 @@ pub fn run(args: &DropArgs) -> anyhow::Result<()> {
     let ctx = RepoContext::from_path(&cwd)?;
 
     with_backend!(ctx, &cwd, git => {
-        let branch = match &args.branch {
-            Some(b) => b.clone(),
-            None => pick_branch(&ctx, &git)?,
+        let branch = if let Some(alias) = &args.workspace {
+            wkm_core::ops::list::branch_for_workspace(&ctx, &git, alias)?
+        } else {
+            match &args.branch {
+                Some(b) => b.clone(),
+                None => pick_branch(&ctx, &git)?,
+            }
         };
 
         if args.delete && !args.yes {

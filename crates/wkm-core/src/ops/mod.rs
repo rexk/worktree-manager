@@ -11,4 +11,5 @@ pub mod stash;
 pub mod status;
 pub mod sync;
 pub mod visibility;
+pub mod workspace;
 pub mod worktree;

@@ -41,6 +41,11 @@ pub fn run(args: &ListArgs) -> anyhow::Result<()> {
                 .as_deref()
                 .map(|p| format!(" {}", s.parent.apply_to(format!("(parent: {p})"))))
                 .unwrap_or_default();
+            let alias = entry
+                .workspace_alias
+                .as_deref()
+                .map(|a| format!(" (alias: {a})"))
+                .unwrap_or_default();
             let wt = if args.long {
                 entry
                     .worktree_path
@@ -67,7 +72,7 @@ pub fn run(args: &ListArgs) -> anyhow::Result<()> {
                 ),
                 _ => String::new(),
             };
-            println!("  {name}{parent}{wt}{stash}{ahead_behind}");
+            println!("  {name}{parent}{wt}{alias}{stash}{ahead_behind}");
         }
         Ok(())
     })

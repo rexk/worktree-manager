@@ -14,4 +14,5 @@ pub mod shell_setup;
 pub mod stash;
 pub mod status;
 pub mod sync;
+pub mod workspace;
 pub mod worktree;

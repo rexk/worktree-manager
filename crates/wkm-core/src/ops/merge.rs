@@ -128,8 +128,22 @@ pub fn merge(
         }
     }
 
-    // Remove child's worktree if it has one
-    if let Some(ref wt_path) = child_worktree {
+    // If this branch's worktree has a workspace alias, park it on a fresh
+    // `_wkm/parked/<alias>` branch at the current parent tip so the directory
+    // survives the merge for the next iteration.
+    let aliased_workspace = child_worktree
+        .as_ref()
+        .and_then(|wt| crate::ops::workspace::alias_for_path(&wkm_state, wt));
+
+    if let (Some(wt_path), Some(alias)) = (&child_worktree, &aliased_workspace) {
+        let parked = format!("_wkm/parked/{alias}");
+        let parent_ref_tip = git.branch_ref(&current_branch)?;
+        // Create or move _wkm/parked/<alias> to the current parent tip.
+        git.force_branch(&parked, &parent_ref_tip)?;
+        // Switch the workspace to the parked branch so the merged branch is freed.
+        git.checkout(wt_path, &parked)?;
+    } else if let Some(ref wt_path) = child_worktree {
+        // No alias — preserve existing behaviour: tear the worktree down.
         let _ = git.worktree_remove(wt_path, true);
     }
 
@@ -142,7 +156,7 @@ pub fn merge(
     // Delete child branch
     let _ = git.delete_branch(child_branch, true);
 
-    // Remove child from state
+    // Remove child from state (aliases stay in state.workspaces).
     wkm_state.branches.remove(child_branch);
 
     // Clear WAL
@@ -508,6 +522,53 @@ mod tests {
         assert!(!wkm_state.branches.contains_key("child-a"));
         assert!(!wkm_state.branches.contains_key("child-b"));
         assert!(!wkm_state.branches.contains_key("child-c"));
+    }
+
+    #[test]
+    fn merge_with_alias_parks_worktree() {
+        use crate::ops::worktree::{self, CreateOptions};
+
+        let (_repo, ctx, git) = setup();
+
+        // Create a worktree with an alias, add a commit, then merge.
+        let created = worktree::create(
+            &ctx,
+            &git,
+            &CreateOptions {
+                branch: "feat".to_string(),
+                base: None,
+                description: None,
+                name: Some("specs".to_string()),
+            },
+        )
+        .unwrap();
+        let wt_path = created.worktree_path.clone();
+
+        // Create a commit in the worktree so the merge has real work.
+        std::fs::write(wt_path.join("feat-file"), "content").unwrap();
+        wkm_sandbox::git(&wt_path, &["add", "."]);
+        wkm_sandbox::git(&wt_path, &["commit", "-m", "feat commit"]);
+
+        let main_wt = git.main_worktree_path().unwrap();
+        merge(&ctx, &git, &main_wt, "feat", None).unwrap();
+
+        // Worktree survives.
+        assert!(wt_path.exists(), "worktree directory should persist");
+
+        // Worktree is parked on _wkm/parked/specs.
+        let current = git.current_branch(&wt_path).unwrap();
+        assert_eq!(current.as_deref(), Some("_wkm/parked/specs"));
+        assert!(git.branch_exists("_wkm/parked/specs").unwrap());
+
+        // Merged branch is gone.
+        assert!(!git.branch_exists("feat").unwrap());
+
+        // Alias entry still points at the worktree.
+        let state = state::read_state(&ctx.state_path).unwrap().unwrap();
+        assert!(state.workspaces.contains_key("specs"));
+        assert_eq!(state.workspaces["specs"].worktree_path, wt_path);
+        // BranchEntry for the merged branch is removed.
+        assert!(!state.branches.contains_key("feat"));
     }
 
     #[test]

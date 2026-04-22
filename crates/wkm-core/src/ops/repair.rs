@@ -16,6 +16,7 @@ pub struct RepairResult {
     pub branches_adopted: Vec<String>,
     pub orphan_branches_deleted: Vec<String>,
     pub pending_removals_cleaned: Vec<String>,
+    pub workspace_aliases_cleared: Vec<String>,
 }
 
 /// Run repair: enforce all invariants.
@@ -148,12 +149,36 @@ pub fn repair(
         }
     }
 
+    // 7a. Drop workspace alias entries whose path no longer exists or whose
+    // alias fails validation (e.g. hand-edited invalid name).
+    let stale_aliases: Vec<String> = wkm_state
+        .workspaces
+        .iter()
+        .filter(|(alias, entry)| {
+            crate::encoding::validate_workspace_alias(alias).is_err()
+                || !entry.worktree_path.exists()
+        })
+        .map(|(alias, _)| alias.clone())
+        .collect();
+    for alias in &stale_aliases {
+        wkm_state.workspaces.remove(alias);
+        result.workspace_aliases_cleared.push(alias.clone());
+    }
+
+    // Live set of `_wkm/parked/<alias>` branches that should be preserved.
+    let live_parked: std::collections::BTreeSet<String> = wkm_state
+        .workspaces
+        .keys()
+        .map(|a| format!("_wkm/parked/{a}"))
+        .collect();
+
     // 8. Delete orphaned `_wkm/*` branches
     // Collect all _wkm/* branches that exist
     let mut orphan_candidates: Vec<String> = Vec::new();
     for wt in &worktrees {
         if let Some(ref branch) = wt.branch
             && branch.starts_with("_wkm/")
+            && !live_parked.contains(branch)
         {
             orphan_candidates.push(branch.clone());
         }
@@ -177,7 +202,7 @@ pub fn repair(
     // (They might exist as regular branches without worktrees)
     let all_wkm_branches = find_wkm_branches(git)?;
     for branch in all_wkm_branches {
-        if !orphan_candidates.contains(&branch) {
+        if !orphan_candidates.contains(&branch) && !live_parked.contains(&branch) {
             let _ = git.delete_branch(&branch, true);
             result.orphan_branches_deleted.push(branch);
         }
@@ -271,6 +296,7 @@ mod tests {
                 branch: "feat".to_string(),
                 base: None,
                 description: None,
+                name: None,
             },
         )
         .unwrap();

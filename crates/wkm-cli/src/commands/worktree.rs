@@ -31,12 +31,18 @@ pub struct CreateArgs {
     /// Description
     #[arg(short, long)]
     pub description: Option<String>,
+    /// Workspace alias (persists across merges; usable with `wkm wp <name>`)
+    #[arg(short = 'n', long)]
+    pub name: Option<String>,
 }
 
 #[derive(Args)]
 pub struct RemoveArgs {
     /// Branch name (defaults to current branch)
     pub branch: Option<String>,
+    /// Remove the worktree identified by the named workspace alias
+    #[arg(short = 'w', long = "workspace", conflicts_with = "branch")]
+    pub workspace: Option<String>,
     /// Force removal even if dirty
     #[arg(short, long)]
     pub force: bool,
@@ -56,19 +62,28 @@ pub fn run(args: &WorktreeArgs) -> anyhow::Result<()> {
                         branch: create_args.branch.clone(),
                         base: create_args.base.clone(),
                         description: create_args.description.clone(),
+                        name: create_args.name.clone(),
                     },
                 )?;
                 if result.created_branch {
                     println!("Created branch '{}'", result.branch);
                 }
                 println!("Worktree: {}", result.worktree_path.display());
+                if let Some(ref alias) = create_args.name {
+                    println!("Workspace alias: {alias}");
+                }
             }
             WorktreeCommands::Remove(remove_args) => {
-                let branch = remove_args.branch.as_deref();
-                let result = worktree::remove(&ctx, &git, branch, remove_args.force);
+                let resolved_branch = if let Some(alias) = &remove_args.workspace {
+                    Some(wkm_core::ops::list::branch_for_workspace(&ctx, &git, alias)?)
+                } else {
+                    remove_args.branch.clone()
+                };
+                let branch_ref = resolved_branch.as_deref();
+                let result = worktree::remove(&ctx, &git, branch_ref, remove_args.force);
                 match result {
                     Ok(removed) => println!("Removed worktree for '{removed}'"),
-                    Err(e) if branch.is_none() && ui::is_interactive() => {
+                    Err(e) if branch_ref.is_none() && ui::is_interactive() => {
                         let picked = pick_worktree_branch(&ctx, &git)?;
                         let _ = e;
                         let removed = worktree::remove(&ctx, &git, Some(&picked), remove_args.force)?;

@@ -47,6 +47,20 @@ pub enum WkmError {
     #[error("worktree directory for branch '{0}' no longer exists at {1}. Run `wkm repair` to fix")]
     WorktreePathMissing(String, PathBuf),
 
+    #[error("workspace '{0}' is not registered")]
+    WorkspaceNotFound(String),
+
+    #[error(
+        "workspace alias '{0}' already exists (pointing at {1:?}). Use `wkm workspace rename` or `wkm workspace clear` first"
+    )]
+    WorkspaceAliasExists(String, PathBuf),
+
+    #[error("invalid workspace alias: {0}")]
+    InvalidWorkspaceAlias(String),
+
+    #[error("workspace '{0}' directory no longer exists at {1}. Run `wkm repair` to fix")]
+    WorkspacePathMissing(String, PathBuf),
+
     #[error("another wkm operation is in progress (PID {0})")]
     LockHeld(u32),
 
