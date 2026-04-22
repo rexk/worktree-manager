@@ -44,6 +44,11 @@ pub enum WkmError {
     #[error("no worktree for branch '{0}'. Use `wkm worktree create` or `wkm checkout`")]
     NoWorktree(String),
 
+    #[error(
+        "branch '{0}' has a pending stash. Apply it (`wkm stash apply {0}`), drop it (`wkm stash drop {0}`), or re-run with `--drop-stash`"
+    )]
+    PendingStash(String),
+
     #[error("worktree directory for branch '{0}' no longer exists at {1}. Run `wkm repair` to fix")]
     WorktreePathMissing(String, PathBuf),
 

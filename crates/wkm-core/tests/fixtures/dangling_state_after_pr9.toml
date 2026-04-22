@@ -1,0 +1,54 @@
+# Fixture: state file representing a repo in the user-reported messy state
+# after PR #9 cleared stale main-worktree paths but left dangling entries.
+#
+# Placeholders substituted by the test at load time:
+#   {STORAGE_DIR}      absolute path to the wkm storage dir for this repo
+#   {REAL_FEATURE_WT}  absolute path to a secondary worktree that truly exists
+#   {BOGUS_WT}         absolute path to a worktree path that does NOT exist
+#
+# Scenarios encoded below:
+#   - dangling-1..3        legacy worktree-less entries, no stash         → pruned
+#   - stashed-branch       worktree-less but carries an auto-stash SHA    → kept
+#   - had-bogus-path       worktree_path points at a missing directory    → path cleared, then pruned
+#   - hosted               current main-worktree branch (worktree_path None per invariant) → kept
+#   - real-feature         legitimate secondary worktree                  → kept
+
+version = 1
+
+[config]
+base_branch = "main"
+merge_strategy = "ff"
+naming_strategy = "timestamp"
+storage_dir = '{STORAGE_DIR}'
+worktree_backend = "git"
+
+[branches.dangling-1]
+parent = "main"
+created_at = "2026-01-01T00:00:00Z"
+
+[branches.dangling-2]
+parent = "main"
+created_at = "2026-01-02T00:00:00Z"
+
+[branches.dangling-3]
+parent = "main"
+created_at = "2026-01-03T00:00:00Z"
+
+[branches.stashed-branch]
+parent = "main"
+stash_commit = "deadbeefcafebabe0123456789abcdef01234567"
+created_at = "2026-01-04T00:00:00Z"
+
+[branches.had-bogus-path]
+parent = "main"
+worktree_path = '{BOGUS_WT}'
+created_at = "2026-01-05T00:00:00Z"
+
+[branches.hosted]
+parent = "main"
+created_at = "2026-01-06T00:00:00Z"
+
+[branches.real-feature]
+parent = "main"
+worktree_path = '{REAL_FEATURE_WT}'
+created_at = "2026-01-07T00:00:00Z"
