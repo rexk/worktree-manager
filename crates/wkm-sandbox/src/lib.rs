@@ -107,6 +107,17 @@ impl TestRepo {
         }
     }
 
+    /// Install a hand-crafted `wkm.toml` state file (placed in the git
+    /// common dir) directly, bypassing any `wkm` command. Useful for
+    /// reproducing legacy or corrupted state in tests.
+    pub fn install_state_fixture(&self, toml_contents: &str) {
+        let path = self.git_common_dir().join("wkm.toml");
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).expect("failed to create git common dir parent");
+        }
+        std::fs::write(&path, toml_contents).expect("failed to write wkm.toml fixture");
+    }
+
     /// Make the working tree dirty by modifying a tracked file.
     pub fn make_dirty(&self) {
         let file_path = self.path.join("initial");

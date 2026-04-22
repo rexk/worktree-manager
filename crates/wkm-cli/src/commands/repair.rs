@@ -26,6 +26,9 @@ pub fn run(_args: &RepairArgs) -> anyhow::Result<()> {
         for branch in &result.branches_removed {
             println!("Removed stale state entry for '{branch}'.");
         }
+        for branch in &result.branches_pruned {
+            println!("Pruned worktree-less entry for '{branch}'.");
+        }
         for branch in &result.worktree_paths_cleared {
             println!("Cleared missing worktree path for '{branch}'.");
         }
@@ -46,6 +49,7 @@ pub fn run(_args: &RepairArgs) -> anyhow::Result<()> {
             || result.git_worktree_repaired
             || result.wal_cleared
             || !result.branches_removed.is_empty()
+            || !result.branches_pruned.is_empty()
             || !result.worktree_paths_cleared.is_empty()
             || !result.worktree_paths_updated.is_empty()
             || !result.branches_adopted.is_empty()

@@ -40,6 +40,9 @@ pub struct RemoveArgs {
     /// Force removal even if dirty
     #[arg(short, long)]
     pub force: bool,
+    /// Drop any pending auto-stash for the branch instead of erroring
+    #[arg(long)]
+    pub drop_stash: bool,
 }
 
 pub fn run(args: &WorktreeArgs) -> anyhow::Result<()> {
@@ -65,13 +68,29 @@ pub fn run(args: &WorktreeArgs) -> anyhow::Result<()> {
             }
             WorktreeCommands::Remove(remove_args) => {
                 let branch = remove_args.branch.as_deref();
-                let result = worktree::remove(&ctx, &git, branch, remove_args.force);
+                let result = worktree::remove(
+                    &ctx,
+                    &git,
+                    &worktree::RemoveOptions {
+                        branch,
+                        force: remove_args.force,
+                        drop_stash: remove_args.drop_stash,
+                    },
+                );
                 match result {
                     Ok(removed) => println!("Removed worktree for '{removed}'"),
                     Err(e) if branch.is_none() && ui::is_interactive() => {
                         let picked = pick_worktree_branch(&ctx, &git)?;
                         let _ = e;
-                        let removed = worktree::remove(&ctx, &git, Some(&picked), remove_args.force)?;
+                        let removed = worktree::remove(
+                            &ctx,
+                            &git,
+                            &worktree::RemoveOptions {
+                                branch: Some(&picked),
+                                force: remove_args.force,
+                                drop_stash: remove_args.drop_stash,
+                            },
+                        )?;
                         println!("Removed worktree for '{removed}'");
                     }
                     Err(e) => return Err(e.into()),
