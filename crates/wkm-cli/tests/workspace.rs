@@ -1,6 +1,19 @@
+use std::path::Path;
 use std::process::Command;
 
 use wkm_sandbox::TestRepo;
+
+/// Compare a path printed by the CLI (stdout) with a known filesystem path.
+///
+/// On Windows, git reports `C:/…` (forward slashes) while `std::fs::canonicalize`
+/// returns `C:\…`. Canonicalize both sides so the equality check is
+/// format-agnostic.
+fn paths_eq(printed: &str, expected: &Path) -> bool {
+    let printed_path = Path::new(printed);
+    let left = wkm_sandbox::canonicalize(printed_path);
+    let right = wkm_sandbox::canonicalize(expected);
+    left == right
+}
 
 fn wkm_bin() -> String {
     env!("CARGO_BIN_EXE_wkm").to_string()
@@ -37,7 +50,12 @@ fn wp_main_token_returns_main_worktree() {
     init(&repo);
 
     let (stdout, _) = run_ok(&repo, &["wp", "@main"]);
-    assert_eq!(stdout.trim(), repo.path().to_string_lossy());
+    assert!(
+        paths_eq(stdout.trim(), repo.path()),
+        "expected '{}' == '{}'",
+        stdout.trim(),
+        repo.path().display()
+    );
 }
 
 #[test]
@@ -46,7 +64,12 @@ fn wp_no_arg_returns_main_worktree() {
     init(&repo);
 
     let (stdout, _) = run_ok(&repo, &["wp"]);
-    assert_eq!(stdout.trim(), repo.path().to_string_lossy());
+    assert!(
+        paths_eq(stdout.trim(), repo.path()),
+        "expected '{}' == '{}'",
+        stdout.trim(),
+        repo.path().display()
+    );
 }
 
 #[test]
