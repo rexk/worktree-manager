@@ -157,12 +157,26 @@ pub fn create(
     })
 }
 
-/// Remove a worktree for a branch.
+/// Options for removing a worktree.
+#[derive(Debug, Default, Clone)]
+pub struct RemoveOptions<'a> {
+    /// Branch name (defaults to current branch).
+    pub branch: Option<&'a str>,
+    /// Force worktree removal even if dirty.
+    pub force: bool,
+    /// Drop any pending auto-stash on the branch instead of erroring.
+    pub drop_stash: bool,
+}
+
+/// Remove a worktree for a branch, and drop the wkm state entry.
+///
+/// The underlying git branch is preserved; only the worktree directory and
+/// the wkm-tracked metadata are removed. Errors with `PendingStash` if the
+/// branch has a recorded auto-stash, unless `opts.drop_stash` is set.
 pub fn remove(
     ctx: &RepoContext,
     git: &(impl GitDiscovery + GitBranches + GitWorktrees),
-    branch: Option<&str>,
-    force: bool,
+    opts: &RemoveOptions<'_>,
 ) -> Result<String, WkmError> {
     let lock = WkmLock::acquire(&ctx.lock_path)?;
 
@@ -173,7 +187,7 @@ pub fn remove(
     }
 
     // Determine which branch to remove
-    let branch_name = if let Some(b) = branch {
+    let branch_name = if let Some(b) = opts.branch {
         b.to_string()
     } else {
         // Default to current branch
@@ -192,6 +206,11 @@ pub fn remove(
         .clone()
         .ok_or_else(|| WkmError::NoWorktree(branch_name.clone()))?;
 
+    // Guard against silently dropping an auto-stash. `drop_stash` opts out.
+    if entry.stash_commit.is_some() && !opts.drop_stash {
+        return Err(WkmError::PendingStash(branch_name));
+    }
+
     // Check if we're inside the worktree
     if let Ok(cwd) = std::env::current_dir()
         && cwd.starts_with(&worktree_path)
@@ -206,11 +225,8 @@ pub fn remove(
         let _ = jj.workspace_forget(ws_name);
     }
 
-    // Update state first — clear worktree_path before touching the filesystem
-    if let Some(entry) = wkm_state.branches.get_mut(&branch_name) {
-        entry.worktree_path = None;
-        entry.jj_workspace_name = None;
-    }
+    // Drop the wkm state entry entirely — the git branch itself is preserved.
+    wkm_state.branches.remove(&branch_name);
     // Drop any workspace alias pointing at this directory.
     let worktree_path_ref = worktree_path.clone();
     wkm_state
@@ -241,7 +257,7 @@ pub fn remove(
         spawn_background_delete(&removing_path);
     } else if worktree_path.exists() {
         // Fallback: rename failed (cross-filesystem), use synchronous removal
-        git.worktree_remove(&worktree_path, force)?;
+        git.worktree_remove(&worktree_path, opts.force)?;
     }
 
     drop(lock);
@@ -476,16 +492,23 @@ mod tests {
             .clone();
         assert!(wt_path.exists());
 
-        let removed = remove(&ctx, &git, Some("feature"), false).unwrap();
+        let removed = remove(
+            &ctx,
+            &git,
+            &RemoveOptions {
+                branch: Some("feature"),
+                ..Default::default()
+            },
+        )
+        .unwrap();
         assert_eq!(removed, "feature");
 
         // Original worktree path should be gone (renamed to .wkm-removing)
         assert!(!wt_path.exists());
 
-        // Branch should still be in state but without worktree_path
+        // Branch entry should be gone from wkm state entirely
         let wkm_state = state::read_state(&ctx.state_path).unwrap().unwrap();
-        assert!(wkm_state.branches.contains_key("feature"));
-        assert!(wkm_state.branches["feature"].worktree_path.is_none());
+        assert!(!wkm_state.branches.contains_key("feature"));
 
         // Git branch should still exist
         assert!(git.branch_exists("feature").unwrap());
@@ -519,18 +542,111 @@ mod tests {
             .clone();
         let removing_path = wt_path.with_extension("wkm-removing");
 
-        remove(&ctx, &git, Some("feature"), false).unwrap();
+        remove(
+            &ctx,
+            &git,
+            &RemoveOptions {
+                branch: Some("feature"),
+                ..Default::default()
+            },
+        )
+        .unwrap();
 
         // Original path gone
         assert!(!wt_path.exists());
 
         // .wkm-removing may still exist briefly (background rm -rf)
-        // but the state should already be updated
+        // but the state entry should already be gone
         let wkm_state = state::read_state(&ctx.state_path).unwrap().unwrap();
-        assert!(wkm_state.branches["feature"].worktree_path.is_none());
+        assert!(!wkm_state.branches.contains_key("feature"));
 
         // Clean up for test
         let _ = std::fs::remove_dir_all(&removing_path);
+    }
+
+    #[test]
+    fn worktree_remove_errors_on_pending_stash() {
+        let (_repo, ctx, git) = setup();
+
+        create(
+            &ctx,
+            &git,
+            &CreateOptions {
+                branch: "feature".to_string(),
+                base: None,
+                description: None,
+                name: None,
+            },
+        )
+        .unwrap();
+
+        // Simulate a pending auto-stash recorded on the entry
+        let mut wkm_state = state::read_state(&ctx.state_path).unwrap().unwrap();
+        wkm_state.branches.get_mut("feature").unwrap().stash_commit =
+            Some("deadbeefcafebabe".to_string());
+        state::write_state(&ctx.state_path, &wkm_state).unwrap();
+
+        let result = remove(
+            &ctx,
+            &git,
+            &RemoveOptions {
+                branch: Some("feature"),
+                ..Default::default()
+            },
+        );
+        assert!(
+            matches!(result, Err(WkmError::PendingStash(ref b)) if b == "feature"),
+            "expected PendingStash error, got: {result:?}"
+        );
+
+        // State must be unchanged
+        let wkm_state = state::read_state(&ctx.state_path).unwrap().unwrap();
+        assert!(wkm_state.branches.contains_key("feature"));
+        assert_eq!(
+            wkm_state.branches["feature"].stash_commit.as_deref(),
+            Some("deadbeefcafebabe"),
+        );
+    }
+
+    #[test]
+    fn worktree_remove_with_drop_stash_succeeds() {
+        let (_repo, ctx, git) = setup();
+
+        create(
+            &ctx,
+            &git,
+            &CreateOptions {
+                branch: "feature".to_string(),
+                base: None,
+                description: None,
+                name: None,
+            },
+        )
+        .unwrap();
+
+        let mut wkm_state = state::read_state(&ctx.state_path).unwrap().unwrap();
+        wkm_state.branches.get_mut("feature").unwrap().stash_commit =
+            Some("deadbeefcafebabe".to_string());
+        state::write_state(&ctx.state_path, &wkm_state).unwrap();
+
+        let removed = remove(
+            &ctx,
+            &git,
+            &RemoveOptions {
+                branch: Some("feature"),
+                drop_stash: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(removed, "feature");
+
+        // Entry should be gone
+        let wkm_state = state::read_state(&ctx.state_path).unwrap().unwrap();
+        assert!(!wkm_state.branches.contains_key("feature"));
+
+        // Git branch itself remains
+        assert!(git.branch_exists("feature").unwrap());
     }
 
     #[test]

@@ -285,7 +285,7 @@ Set via `wkm init --worktree-backend git|git-jj|jj`. Changing backend with exist
 | `wkm checkout -b <branch>` | Create a new branch from the current branch, record parent relationship, and switch to it in the current directory. Errors if branch already exists. Works from any worktree — parent is the branch currently checked out in that worktree. |
 | `wkm adopt <branch> [-p parent]` | Adopt an existing git branch into wkm tracking. Records the parent-child relationship in state. Automatically detects if the branch is already checked out in a worktree (via `git worktree list`) and records the path. Does not create a new worktree. If `-p` is not provided, defaults to the current branch. |
 | `wkm worktree create [<branch>] [-b base]` | Create a worktree at the conventional location. If `<branch>` is omitted, auto-generate a name using the configured strategy. Creates the branch from `base` (default: current branch) if it doesn't exist. `-b` sets both the creation point and the parent relationship. Records state. Prints the worktree path. Errors if branch is already checked out elsewhere. |
-| `wkm worktree remove [<branch>]` | Remove the worktree for the given branch. Branch itself is kept (with parent relationship intact). Cleans up associated `_wkm/*` temp branches. Errors if run from inside the worktree being removed (user must navigate out first, e.g., `cd $(wkm wp main)`). If no branch specified, removes the worktree for the current directory's branch. |
+| `wkm worktree remove [<branch>] [--drop-stash]` | Remove the worktree for the given branch **and drop its wkm state entry**. The underlying git branch is preserved. Cleans up associated `_wkm/*` temp branches. Errors with `PendingStash` if the branch has a recorded auto-stash (from a prior `wkm checkout`); apply or drop the stash first, or pass `--drop-stash` to discard it. Errors if run from inside the worktree being removed (user must navigate out first, e.g., `cd $(wkm wp main)`). If no branch specified, removes the worktree for the current directory's branch. |
 | `wkm sync [--continue / --abort]` | Fetch remote, fast-forward base branch if possible, and restack the branch graph: cascade rebase of all child branches onto their updated parents. Does NOT integrate. Requires all affected worktrees to be clean. `--continue` resumes after conflict resolution (and resumes parent operation if linked). `--abort` restores pre-sync state (and clears parent merge --all if linked). |
 | `wkm merge <branch> [--all / --yes / --abort]` | Integrate child branch into current branch (fast-forward by default). Confirmation prompt before mutations. Re-parents descendants, runs internal sync on them, cleans up merged branch/worktree/temp branches. `--all` merges all direct children sequentially (resumes automatically after descendant sync conflicts). `--yes` skips prompts. `--abort` restores pre-merge state (only before descendant sync begins). |
 | `wkm set-parent <new-parent> [<branch>]` | Change the parent of a tracked branch and sync. If `<branch>` omitted, defaults to current branch. Validates that both branches are tracked (or base branch), that the new parent exists in git, and that no cycle would be created. Updates parent metadata, then runs a full sync (cascade rebase). On conflict, user resolves with `wkm sync --continue` or `--abort`. |
@@ -306,7 +306,7 @@ Set via `wkm init --worktree-backend git|git-jj|jj`. Changing backend with exist
 | `wkm config get <key>` | Get a config value. |
 | `wkm config set <key> <value>` | Set a config value. Keys: `base_branch`, `merge_strategy`, `naming_strategy`, `prefix`, `max_branch_length`, `storage_dir`. |
 | `wkm config list` | List all config values for the current repo. |
-| `wkm repair` | Reconcile wkm state with actual filesystem and git state. Runs `git worktree repair` and `git worktree prune` to fix git-level issues. Removes stale state entries for deleted worktrees and branches that no longer exist in the git repository. Reconciles `worktree_path` for tracked branches against `git worktree list`: clears any `worktree_path` pointing at the main worktree (violates the §5.3 invariant) and any `worktree_path` for a branch not currently in `git worktree list` (stale entry from a prior checkout). Cleans up orphaned `_wkm/*` branches. Detects and warns about manually created `_wkm` branches that conflict with the namespace. Cleans up stale `wkm:`-prefixed stash entries (scans `git stash list`, drops entries whose hashes are no longer referenced by any active WAL entry **OR** branch metadata in state, and have been created more than 24 hours ago). Recovers or rolls back incomplete operations using the write-ahead log. |
+| `wkm repair` | Reconcile wkm state with actual filesystem and git state. Runs `git worktree repair` and `git worktree prune` to fix git-level issues. Removes stale state entries for deleted worktrees and branches that no longer exist in the git repository. Reconciles `worktree_path` for tracked branches against `git worktree list`: clears any `worktree_path` pointing at the main worktree (violates the §5.3 invariant) and any `worktree_path` for a branch not currently in `git worktree list` (stale entry from a prior checkout). Prunes tracked branch entries whose worktree is gone (i.e. `worktree_path` is now `None`), **except** those that hold a pending auto-stash (pruning would orphan the stash per §8.1) or match the branch currently checked out in the main worktree (§5.3 invariant). Cleans up orphaned `_wkm/*` branches. Detects and warns about manually created `_wkm` branches that conflict with the namespace. Cleans up stale `wkm:`-prefixed stash entries (scans `git stash list`, drops entries whose hashes are no longer referenced by any active WAL entry **OR** branch metadata in state, and have been created more than 24 hours ago). Recovers or rolls back incomplete operations using the write-ahead log. |
 
 ### 7.4 Stash Management
 
@@ -379,18 +379,19 @@ Set via `wkm init --worktree-backend git|git-jj|jj`. Changing backend with exist
 1. Auto-generate a branch name using the configured strategy (default: `<current-branch>-YYYYMMDD-HHMM`, with prefix if configured).
 2. Follow the same steps as above with the generated name.
 
-**`wkm worktree remove [<branch>]`**:
+**`wkm worktree remove [<branch>] [--drop-stash]`**:
 
 1. If no branch specified: use current directory's branch.
 2. If currently inside the worktree being removed: error with message — "Cannot remove the current worktree. Navigate out first: `cd $(wkm cd <main-branch>)`".
 3. Acquire lockfile. Re-validate preconditions.
-4. Update state: mark branch as having no worktree (keep parent-child relationship).
-5. Rename `<worktree_path>` → `<worktree_path>.wkm-removing` (instant on same filesystem). If rename fails (e.g. cross-filesystem), fall back to synchronous `git worktree remove --force`.
-6. Run `git worktree prune` to clean git's worktree admin entries for the now-missing path.
-7. Clean up associated `_wkm/*` temp branches.
-8. Release lockfile.
-9. Spawn a detached `rm -rf <worktree_path>.wkm-removing` process in the background. Return immediately.
-10. Print confirmation.
+4. If the branch entry has `stash_commit = Some(...)` and `--drop-stash` was not passed: return a `PendingStash` error suggesting `wkm stash apply <branch>` / `wkm stash drop <branch>`. Under `--drop-stash`, skip the guard and continue.
+5. Drop the wkm state entry for the branch entirely (the underlying git branch is preserved — the user can recreate the worktree later via `wkm worktree create <branch>` or `wkm checkout <branch>`). Legacy dangling entries produced by earlier versions are pruned by `wkm repair` (§7.3).
+6. Rename `<worktree_path>` → `<worktree_path>.wkm-removing` (instant on same filesystem). If rename fails (e.g. cross-filesystem), fall back to synchronous `git worktree remove --force`.
+7. Run `git worktree prune` to clean git's worktree admin entries for the now-missing path.
+8. Clean up associated `_wkm/*` temp branches.
+9. Release lockfile.
+10. Spawn a detached `rm -rf <worktree_path>.wkm-removing` process in the background. Return immediately.
+11. Print confirmation.
 
 **Background deletion recovery:** If the background `rm -rf` is interrupted, the `.wkm-removing` directory persists harmlessly. `wkm repair` scans the storage directory for `*.wkm-removing` directories and deletes them.
 

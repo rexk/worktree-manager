@@ -884,12 +884,19 @@ mod tests {
             .unwrap()
             .clone();
 
-        worktree::remove(&ctx, &git, Some("feature"), false).unwrap();
+        worktree::remove(
+            &ctx,
+            &git,
+            &worktree::RemoveOptions {
+                branch: Some("feature"),
+                ..Default::default()
+            },
+        )
+        .unwrap();
 
-        // State should be cleared
+        // State entry should be gone entirely
         let wkm_state = state::read_state(&ctx.state_path).unwrap().unwrap();
-        assert!(wkm_state.branches["feature"].worktree_path.is_none());
-        assert!(wkm_state.branches["feature"].jj_workspace_name.is_none());
+        assert!(!wkm_state.branches.contains_key("feature"));
 
         // Directory should be gone (or renamed)
         assert!(!wt_path.exists());

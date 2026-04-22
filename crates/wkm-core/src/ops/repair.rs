@@ -11,6 +11,7 @@ pub struct RepairResult {
     pub stale_lock_removed: bool,
     pub git_worktree_repaired: bool,
     pub branches_removed: Vec<String>,
+    pub branches_pruned: Vec<String>,
     pub worktree_paths_cleared: Vec<String>,
     pub worktree_paths_updated: Vec<String>,
     pub branches_adopted: Vec<String>,
@@ -27,9 +28,11 @@ pub struct RepairResult {
 /// 4. Remove state entries for branches that no longer exist in git
 /// 5. Clear worktree_path for entries where the path no longer exists on disk
 /// 6. Reconcile worktree_path for tracked branches against actual git worktrees
-/// 7. Auto-adopt untracked branches checked out in worktrees
-/// 8. Delete orphaned `_wkm/*` branches not referenced by state or WAL
-/// 9. Clean up pending `.wkm-removing` directories
+/// 7. Prune worktree-less state entries (unless they hold a stash or are the
+///    branch currently hosted in the main worktree)
+/// 8. Auto-adopt untracked branches checked out in worktrees
+/// 9. Delete orphaned `_wkm/*` branches not referenced by state or WAL
+/// 10. Clean up pending `.wkm-removing` directories
 pub fn repair(
     ctx: &RepoContext,
     git: &(impl GitDiscovery + GitBranches + GitWorktrees + GitStatus + GitStash + GitMutations),
@@ -114,7 +117,37 @@ pub fn repair(
         }
     }
 
-    // 6. Auto-adopt untracked branches that are checked out in worktrees
+    // 6. Prune worktree-less state entries.
+    //
+    // After reconciliation, `worktree_path = None` means "not hosted in any
+    // worktree". Such entries are legacy clutter (e.g. left over from the
+    // pre-redesign `wkm worktree remove` behavior or from externally-deleted
+    // worktrees). Drop them so `wkm list` stays in sync with reality.
+    //
+    // Safety:
+    // - `stash_commit.is_some()` — entry holds a recoverable auto-stash;
+    //   pruning would lose the reference (per SPEC §8.1, stash recovery
+    //   reads `BranchEntry.stash_commit`).
+    // - name matches `git.current_branch(main_worktree)` — the branch
+    //   currently hosted in the main worktree has `worktree_path = None` by
+    //   design (SPEC §5.3 invariant); it must not be pruned.
+    let current_main_branch = git.current_branch(&ctx.main_worktree)?;
+    let prune_candidates: Vec<String> = wkm_state
+        .branches
+        .iter()
+        .filter(|(name, entry)| {
+            entry.worktree_path.is_none()
+                && entry.stash_commit.is_none()
+                && current_main_branch.as_deref() != Some(name.as_str())
+        })
+        .map(|(name, _)| name.clone())
+        .collect();
+    for name in prune_candidates {
+        wkm_state.branches.remove(&name);
+        result.branches_pruned.push(name);
+    }
+
+    // 7. Auto-adopt untracked branches that are checked out in worktrees
     let base_branch = &wkm_state.config.base_branch.clone();
     let now = chrono::Utc::now().to_rfc3339();
     for wt in &worktrees {
@@ -149,7 +182,7 @@ pub fn repair(
         }
     }
 
-    // 7a. Drop workspace alias entries whose path no longer exists or whose
+    // 8a. Drop workspace alias entries whose path no longer exists or whose
     // alias fails validation (e.g. hand-edited invalid name).
     let stale_aliases: Vec<String> = wkm_state
         .workspaces
@@ -172,7 +205,7 @@ pub fn repair(
         .map(|a| format!("_wkm/parked/{a}"))
         .collect();
 
-    // 8. Delete orphaned `_wkm/*` branches
+    // 9. Delete orphaned `_wkm/*` branches
     // Collect all _wkm/* branches that exist
     let mut orphan_candidates: Vec<String> = Vec::new();
     for wt in &worktrees {
@@ -208,7 +241,7 @@ pub fn repair(
         }
     }
 
-    // 9. Clean up leftover .wkm-removing directories in storage_dir
+    // 10. Clean up leftover .wkm-removing directories in storage_dir
     if ctx.storage_dir.exists()
         && let Ok(entries) = std::fs::read_dir(&ctx.storage_dir)
     {
@@ -452,6 +485,7 @@ mod tests {
         // Second run should be a no-op
         let result2 = repair(&ctx, &git).unwrap();
         assert!(result2.branches_removed.is_empty());
+        assert!(result2.branches_pruned.is_empty());
         assert!(!result2.wal_cleared);
         assert!(!result2.stale_lock_removed);
         assert!(result2.worktree_paths_cleared.is_empty());
@@ -557,7 +591,8 @@ mod tests {
     #[test]
     fn repair_clears_stale_main_worktree_path() {
         // A branch whose state has worktree_path = Some(main_worktree) but is
-        // not currently checked out anywhere is stale. Repair must clear it.
+        // not currently checked out anywhere is stale. Repair first clears
+        // the bogus path (step 5), then prunes the now-empty entry (step 6).
         let (repo, ctx, git) = setup();
         repo.create_branch("stale-main-ref");
 
@@ -584,9 +619,16 @@ mod tests {
             "repair should clear stale main-worktree path, got: {:?}",
             result.worktree_paths_cleared
         );
+        assert!(
+            result
+                .branches_pruned
+                .contains(&"stale-main-ref".to_string()),
+            "repair should prune the now-empty entry, got: {:?}",
+            result.branches_pruned
+        );
 
         let wkm_state = state::read_state(&ctx.state_path).unwrap().unwrap();
-        assert_eq!(wkm_state.branches["stale-main-ref"].worktree_path, None);
+        assert!(!wkm_state.branches.contains_key("stale-main-ref"));
     }
 
     #[test]
@@ -661,5 +703,110 @@ mod tests {
             !wkm_state.branches.contains_key("main"),
             "Base branch should not appear in branches map"
         );
+    }
+
+    #[test]
+    fn repair_prunes_worktreeless_entry() {
+        // A tracked branch with no worktree, no stash, not the current main
+        // branch is pure legacy clutter — repair removes it from state.
+        let (repo, ctx, git) = setup();
+        repo.create_branch("dangling");
+
+        let mut wkm_state = state::read_state(&ctx.state_path).unwrap().unwrap();
+        wkm_state.branches.insert(
+            "dangling".to_string(),
+            BranchEntry {
+                parent: Some("main".to_string()),
+                worktree_path: None,
+                stash_commit: None,
+                jj_workspace_name: None,
+                description: None,
+                created_at: "2026-01-01T00:00:00Z".to_string(),
+                previous_branch: None,
+            },
+        );
+        state::write_state(&ctx.state_path, &wkm_state).unwrap();
+
+        let result = repair(&ctx, &git).unwrap();
+        assert!(
+            result.branches_pruned.contains(&"dangling".to_string()),
+            "expected 'dangling' in branches_pruned, got: {:?}",
+            result.branches_pruned
+        );
+
+        let wkm_state = state::read_state(&ctx.state_path).unwrap().unwrap();
+        assert!(!wkm_state.branches.contains_key("dangling"));
+        // Git branch itself is preserved.
+        assert!(git.branch_exists("dangling").unwrap());
+    }
+
+    #[test]
+    fn repair_keeps_entry_with_stash() {
+        // An entry with a pending auto-stash must never be pruned — losing
+        // the stash_commit SHA would orphan the stash commit (SPEC §8.1).
+        let (repo, ctx, git) = setup();
+        repo.create_branch("stashed");
+
+        let mut wkm_state = state::read_state(&ctx.state_path).unwrap().unwrap();
+        wkm_state.branches.insert(
+            "stashed".to_string(),
+            BranchEntry {
+                parent: Some("main".to_string()),
+                worktree_path: None,
+                stash_commit: Some("deadbeefcafebabe".to_string()),
+                jj_workspace_name: None,
+                description: None,
+                created_at: "2026-01-01T00:00:00Z".to_string(),
+                previous_branch: None,
+            },
+        );
+        state::write_state(&ctx.state_path, &wkm_state).unwrap();
+
+        let result = repair(&ctx, &git).unwrap();
+        assert!(
+            !result.branches_pruned.contains(&"stashed".to_string()),
+            "entry with pending stash must not be pruned"
+        );
+
+        let wkm_state = state::read_state(&ctx.state_path).unwrap().unwrap();
+        assert!(wkm_state.branches.contains_key("stashed"));
+        assert_eq!(
+            wkm_state.branches["stashed"].stash_commit.as_deref(),
+            Some("deadbeefcafebabe")
+        );
+    }
+
+    #[test]
+    fn repair_keeps_current_main_branch() {
+        // The branch currently checked out in the main worktree has
+        // worktree_path = None by invariant (SPEC §5.3). Pruning would
+        // drop the tracked branch the user is actively working on.
+        let (repo, ctx, git) = setup();
+        repo.create_branch("hosted");
+        wkm_sandbox::git(repo.path(), &["checkout", "hosted"]);
+
+        let mut wkm_state = state::read_state(&ctx.state_path).unwrap().unwrap();
+        wkm_state.branches.insert(
+            "hosted".to_string(),
+            BranchEntry {
+                parent: Some("main".to_string()),
+                worktree_path: None,
+                stash_commit: None,
+                jj_workspace_name: None,
+                description: None,
+                created_at: "2026-01-01T00:00:00Z".to_string(),
+                previous_branch: None,
+            },
+        );
+        state::write_state(&ctx.state_path, &wkm_state).unwrap();
+
+        let result = repair(&ctx, &git).unwrap();
+        assert!(
+            !result.branches_pruned.contains(&"hosted".to_string()),
+            "current main-worktree branch must not be pruned"
+        );
+
+        let wkm_state = state::read_state(&ctx.state_path).unwrap().unwrap();
+        assert!(wkm_state.branches.contains_key("hosted"));
     }
 }
