@@ -3,6 +3,8 @@ mod jj;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
+use rayon::prelude::*;
+
 use crate::encoding;
 use crate::error::WkmError;
 use crate::git::types::RebaseResult;
@@ -23,10 +25,10 @@ pub struct SyncResult {
 /// Sync all tracked branches by rebasing onto their parents.
 ///
 /// Dispatches to `sync_git()` or `sync_jj()` based on detected VCS backend.
-pub fn sync(
-    ctx: &RepoContext,
-    git: &(impl GitDiscovery + GitBranches + GitWorktrees + GitStatus + GitStash + GitMutations),
-) -> Result<SyncResult, WkmError> {
+pub fn sync<G>(ctx: &RepoContext, git: &G) -> Result<SyncResult, WkmError>
+where
+    G: GitDiscovery + GitBranches + GitWorktrees + GitStatus + GitStash + GitMutations + Sync,
+{
     match ctx.vcs_backend {
         VcsBackend::JjColocated => jj::sync_jj(ctx, git),
         VcsBackend::Git => sync_git(ctx, git),
@@ -36,10 +38,10 @@ pub fn sync(
 /// Continue a sync after conflict resolution.
 ///
 /// Dispatches to `sync_continue_git()` or `sync_continue_jj()` based on detected VCS backend.
-pub fn sync_continue(
-    ctx: &RepoContext,
-    git: &(impl GitDiscovery + GitBranches + GitWorktrees + GitStatus + GitStash + GitMutations),
-) -> Result<SyncResult, WkmError> {
+pub fn sync_continue<G>(ctx: &RepoContext, git: &G) -> Result<SyncResult, WkmError>
+where
+    G: GitDiscovery + GitBranches + GitWorktrees + GitStatus + GitStash + GitMutations + Sync,
+{
     match ctx.vcs_backend {
         VcsBackend::JjColocated => jj::sync_continue_jj(ctx, git),
         VcsBackend::Git => sync_continue_git(ctx, git),
@@ -49,10 +51,10 @@ pub fn sync_continue(
 /// Abort a sync, restoring all branches to pre-sync state.
 ///
 /// Dispatches to `sync_abort_git()` or `sync_abort_jj()` based on detected VCS backend.
-pub fn sync_abort(
-    ctx: &RepoContext,
-    git: &(impl GitDiscovery + GitBranches + GitWorktrees + GitStatus + GitStash + GitMutations),
-) -> Result<(), WkmError> {
+pub fn sync_abort<G>(ctx: &RepoContext, git: &G) -> Result<(), WkmError>
+where
+    G: GitDiscovery + GitBranches + GitWorktrees + GitStatus + GitStash + GitMutations + Sync,
+{
     match ctx.vcs_backend {
         VcsBackend::JjColocated => jj::sync_abort_jj(ctx, git),
         VcsBackend::Git => sync_abort_git(ctx, git),
@@ -60,10 +62,10 @@ pub fn sync_abort(
 }
 
 /// Sync all tracked branches using the git backend.
-fn sync_git(
-    ctx: &RepoContext,
-    git: &(impl GitDiscovery + GitBranches + GitWorktrees + GitStatus + GitStash + GitMutations),
-) -> Result<SyncResult, WkmError> {
+fn sync_git<G>(ctx: &RepoContext, git: &G) -> Result<SyncResult, WkmError>
+where
+    G: GitDiscovery + GitBranches + GitWorktrees + GitStatus + GitStash + GitMutations + Sync,
+{
     let lock = WkmLock::acquire(&ctx.lock_path)?;
 
     let mut wkm_state = state::read_state(&ctx.state_path)?.ok_or(WkmError::NotInitialized)?;
@@ -72,17 +74,22 @@ fn sync_git(
         return Err(WkmError::OperationInProgress);
     }
 
-    // Check for dirty worktrees
-    let dirty: Vec<String> = wkm_state
+    // Check for dirty worktrees. Each `is_dirty` shells out to
+    // `git status` — run them in parallel since they're independent
+    // per-worktree calls.
+    let candidates: Vec<(&String, &PathBuf)> = wkm_state
         .branches
         .iter()
-        .filter_map(|(name, entry)| {
-            if let Some(ref wt_path) = entry.worktree_path
-                && git.is_dirty(wt_path).unwrap_or(false)
-            {
-                return Some(name.clone());
+        .filter_map(|(name, entry)| entry.worktree_path.as_ref().map(|wt| (name, wt)))
+        .collect();
+    let dirty: Vec<String> = candidates
+        .par_iter()
+        .filter_map(|(name, wt_path)| {
+            if git.is_dirty(wt_path).unwrap_or(false) {
+                Some((*name).clone())
+            } else {
+                None
             }
-            None
         })
         .collect();
 
@@ -272,10 +279,10 @@ fn sync_git(
 }
 
 /// Continue a sync after conflict resolution (git backend).
-fn sync_continue_git(
-    ctx: &RepoContext,
-    git: &(impl GitDiscovery + GitBranches + GitWorktrees + GitStatus + GitStash + GitMutations),
-) -> Result<SyncResult, WkmError> {
+fn sync_continue_git<G>(ctx: &RepoContext, git: &G) -> Result<SyncResult, WkmError>
+where
+    G: GitDiscovery + GitBranches + GitWorktrees + GitStatus + GitStash + GitMutations + Sync,
+{
     let lock = WkmLock::acquire(&ctx.lock_path)?;
 
     let mut wkm_state = state::read_state(&ctx.state_path)?.ok_or(WkmError::NotInitialized)?;
@@ -388,10 +395,10 @@ fn sync_continue_git(
 }
 
 /// Abort a sync, restoring all branches to pre-sync refs (git backend).
-fn sync_abort_git(
-    ctx: &RepoContext,
-    git: &(impl GitDiscovery + GitBranches + GitWorktrees + GitStatus + GitStash + GitMutations),
-) -> Result<(), WkmError> {
+fn sync_abort_git<G>(ctx: &RepoContext, git: &G) -> Result<(), WkmError>
+where
+    G: GitDiscovery + GitBranches + GitWorktrees + GitStatus + GitStash + GitMutations + Sync,
+{
     let lock = WkmLock::acquire(&ctx.lock_path)?;
 
     let mut wkm_state = state::read_state(&ctx.state_path)?.ok_or(WkmError::NotInitialized)?;

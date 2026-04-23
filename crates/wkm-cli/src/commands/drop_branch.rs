@@ -66,7 +66,7 @@ pub fn run(args: &DropArgs) -> anyhow::Result<()> {
 
 fn pick_branch(
     ctx: &RepoContext,
-    git: &(impl GitDiscovery + GitBranches + GitStatus),
+    git: &(impl GitDiscovery + GitBranches + GitStatus + Sync),
 ) -> anyhow::Result<String> {
     if !ui::is_interactive() {
         anyhow::bail!("Branch argument required in non-interactive mode");

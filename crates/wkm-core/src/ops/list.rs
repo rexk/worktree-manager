@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use rayon::prelude::*;
 use serde::Serialize;
 
 use crate::error::WkmError;
@@ -25,44 +26,67 @@ pub struct ListEntry {
 pub const MAIN_WORKTREE_TOKEN: &str = "@main";
 
 /// List all tracked branches.
-pub fn list(
-    ctx: &RepoContext,
-    git: &(impl GitBranches + GitDiscovery),
-) -> Result<Vec<ListEntry>, WkmError> {
+pub fn list<G>(ctx: &RepoContext, git: &G) -> Result<Vec<ListEntry>, WkmError>
+where
+    G: GitBranches + GitDiscovery + Sync,
+{
     let wkm_state = state::read_state(&ctx.state_path)?.ok_or(WkmError::NotInitialized)?;
 
-    let mut entries = Vec::new();
-    for (name, branch) in &wkm_state.branches {
-        let (ahead, behind) = if let Some(ref parent) = branch.parent {
-            if git.branch_exists(name)? && git.branch_exists(parent)? {
+    // Enumerate all local branches in one git call so the per-branch existence
+    // checks below are pure map lookups instead of N `git rev-parse` subprocesses.
+    let refs = git.branch_refs()?;
+
+    // For each tracked branch decide whether ahead/behind applies, then run
+    // those `git rev-list --count` calls in parallel — each one is its own
+    // subprocess and they're independent.
+    let branch_pairs: Vec<(&str, Option<&str>)> = wkm_state
+        .branches
+        .iter()
+        .map(|(name, branch)| {
+            let parent_for_diff = branch
+                .parent
+                .as_deref()
+                .filter(|parent| refs.contains_key(name.as_str()) && refs.contains_key(*parent));
+            (name.as_str(), parent_for_diff)
+        })
+        .collect();
+
+    let ahead_behind: Vec<(Option<usize>, Option<usize>)> = branch_pairs
+        .par_iter()
+        .map(|(name, parent)| match parent {
+            Some(parent) => {
                 let (a, b) = git.ahead_behind(name, parent)?;
-                (Some(a), Some(b))
-            } else {
-                (None, None)
+                Ok((Some(a), Some(b)))
             }
-        } else {
-            (None, None)
-        };
+            None => Ok((None, None)),
+        })
+        .collect::<Result<Vec<_>, WkmError>>()?;
 
-        let workspace_alias = branch.worktree_path.as_ref().and_then(|p| {
-            wkm_state
-                .workspaces
-                .iter()
-                .find(|(_, w)| w.worktree_path == *p)
-                .map(|(alias, _)| alias.clone())
-        });
+    let entries = wkm_state
+        .branches
+        .iter()
+        .zip(ahead_behind)
+        .map(|((name, branch), (ahead, behind))| {
+            let workspace_alias = branch.worktree_path.as_ref().and_then(|p| {
+                wkm_state
+                    .workspaces
+                    .iter()
+                    .find(|(_, w)| w.worktree_path == *p)
+                    .map(|(alias, _)| alias.clone())
+            });
 
-        entries.push(ListEntry {
-            name: name.clone(),
-            parent: branch.parent.clone(),
-            worktree_path: branch.worktree_path.clone(),
-            has_stash: branch.stash_commit.is_some(),
-            description: branch.description.clone(),
-            ahead_of_parent: ahead,
-            behind_parent: behind,
-            workspace_alias,
-        });
-    }
+            ListEntry {
+                name: name.clone(),
+                parent: branch.parent.clone(),
+                worktree_path: branch.worktree_path.clone(),
+                has_stash: branch.stash_commit.is_some(),
+                description: branch.description.clone(),
+                ahead_of_parent: ahead,
+                behind_parent: behind,
+                workspace_alias,
+            }
+        })
+        .collect();
     Ok(entries)
 }
 

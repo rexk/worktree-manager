@@ -92,10 +92,10 @@ fn jj_op_restore(work_dir: &Path, op_id: &str) -> Result<(), WkmError> {
 /// - No temp worktrees needed (jj rebases without checking out)
 /// - Conflicts are stored in commits rather than blocking
 /// - WAL stores jj operation ID for simple rollback via `jj op restore`
-pub(super) fn sync_jj(
-    ctx: &RepoContext,
-    git: &(impl GitDiscovery + GitBranches + GitWorktrees + GitStatus + GitStash + GitMutations),
-) -> Result<SyncResult, WkmError> {
+pub(super) fn sync_jj<G>(ctx: &RepoContext, git: &G) -> Result<SyncResult, WkmError>
+where
+    G: GitDiscovery + GitBranches + GitWorktrees + GitStatus + GitStash + GitMutations + Sync,
+{
     let lock = WkmLock::acquire(&ctx.lock_path)?;
 
     let mut wkm_state = state::read_state(&ctx.state_path)?.ok_or(WkmError::NotInitialized)?;
@@ -290,10 +290,10 @@ pub(super) fn sync_jj(
 /// In jj, conflicts are stored in commits. After the user resolves conflicts,
 /// they run `jj squash` or `jj resolve`. We just verify the conflicts are gone
 /// and clear the WAL.
-pub(super) fn sync_continue_jj(
-    ctx: &RepoContext,
-    _git: &(impl GitDiscovery + GitBranches + GitWorktrees + GitStatus + GitStash + GitMutations),
-) -> Result<SyncResult, WkmError> {
+pub(super) fn sync_continue_jj<G>(ctx: &RepoContext, _git: &G) -> Result<SyncResult, WkmError>
+where
+    G: GitDiscovery + GitBranches + GitWorktrees + GitStatus + GitStash + GitMutations + Sync,
+{
     let lock = WkmLock::acquire(&ctx.lock_path)?;
 
     let mut wkm_state = state::read_state(&ctx.state_path)?.ok_or(WkmError::NotInitialized)?;
@@ -337,10 +337,10 @@ pub(super) fn sync_continue_jj(
 /// Abort a sync, restoring all branches to pre-sync state (jj backend).
 ///
 /// Uses `jj op restore` to atomically roll back all changes.
-pub(super) fn sync_abort_jj(
-    ctx: &RepoContext,
-    _git: &(impl GitDiscovery + GitBranches + GitWorktrees + GitStatus + GitStash + GitMutations),
-) -> Result<(), WkmError> {
+pub(super) fn sync_abort_jj<G>(ctx: &RepoContext, _git: &G) -> Result<(), WkmError>
+where
+    G: GitDiscovery + GitBranches + GitWorktrees + GitStatus + GitStash + GitMutations + Sync,
+{
     let lock = WkmLock::acquire(&ctx.lock_path)?;
 
     let mut wkm_state = state::read_state(&ctx.state_path)?.ok_or(WkmError::NotInitialized)?;

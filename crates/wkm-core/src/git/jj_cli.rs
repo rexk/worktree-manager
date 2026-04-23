@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -225,6 +226,10 @@ impl GitBranches for JjCli {
 
     fn branch_list(&self) -> Result<Vec<String>> {
         self.inner.branch_list()
+    }
+
+    fn branch_refs(&self) -> Result<BTreeMap<String, String>> {
+        self.inner.branch_refs()
     }
 }
 

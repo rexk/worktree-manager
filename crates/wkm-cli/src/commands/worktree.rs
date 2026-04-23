@@ -118,7 +118,7 @@ pub fn run(args: &WorktreeArgs) -> anyhow::Result<()> {
 
 fn pick_worktree_branch(
     ctx: &RepoContext,
-    git: &(impl GitDiscovery + GitBranches + GitStatus),
+    git: &(impl GitDiscovery + GitBranches + GitStatus + Sync),
 ) -> anyhow::Result<String> {
     let entries = list::list(ctx, git)?;
     let with_worktrees: Vec<_> = entries
