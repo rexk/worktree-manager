@@ -2,6 +2,7 @@ pub mod cli;
 pub mod jj_cli;
 pub mod types;
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use types::{InProgressOp, MergeResult, RebaseResult, StashEntry, WorktreeInfo};
@@ -31,6 +32,12 @@ pub trait GitBranches {
     /// Returns `Some("<remote>/<name>")` if exactly one match exists, else `None`.
     fn resolve_dwim_remote(&self, name: &str) -> Result<Option<String>>;
     fn branch_list(&self) -> Result<Vec<String>>;
+    /// Return all local branches as name → OID in a single git call.
+    ///
+    /// Preferred over per-branch `branch_exists` / `branch_ref` when the
+    /// caller needs information about many branches at once: one subprocess
+    /// instead of N.
+    fn branch_refs(&self) -> Result<BTreeMap<String, String>>;
 }
 
 /// Worktree operations.

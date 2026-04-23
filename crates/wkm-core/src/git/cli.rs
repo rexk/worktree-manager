@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -171,6 +172,24 @@ impl GitBranches for CliGit {
             .filter(|l| !l.is_empty())
             .map(|l| l.to_string())
             .collect())
+    }
+
+    fn branch_refs(&self) -> Result<BTreeMap<String, String>> {
+        let output = self.run_ok(&[
+            "for-each-ref",
+            "refs/heads/",
+            "--format=%(refname:short)\t%(objectname)",
+        ])?;
+        let mut refs = BTreeMap::new();
+        for line in output.lines() {
+            if line.is_empty() {
+                continue;
+            }
+            if let Some((name, oid)) = line.split_once('\t') {
+                refs.insert(name.to_string(), oid.to_string());
+            }
+        }
+        Ok(refs)
     }
 
     fn remote_tracking_branch(&self, branch: &str) -> Result<Option<String>> {
@@ -671,6 +690,22 @@ mod tests {
         let mut branches = git.branch_list().unwrap();
         branches.sort();
         assert_eq!(branches, vec!["alpha", "beta", "main"]);
+    }
+
+    #[test]
+    fn branches_refs_maps_all_local_branches() {
+        let (dir, git) = test_repo();
+        run_git(dir.path(), &["branch", "alpha", "main"]);
+        run_git(dir.path(), &["branch", "feat/nested/name", "main"]);
+
+        let refs = git.branch_refs().unwrap();
+        let expected_main = run_git_output(dir.path(), &["rev-parse", "refs/heads/main"]);
+
+        assert_eq!(refs.len(), 3);
+        assert_eq!(refs.get("main"), Some(&expected_main));
+        assert!(refs.contains_key("alpha"));
+        assert!(refs.contains_key("feat/nested/name"));
+        assert!(!refs.contains_key("nonexistent"));
     }
 
     #[test]

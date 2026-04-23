@@ -35,8 +35,10 @@ pub fn status(
 
     let parent = entry.and_then(|e| e.parent.clone());
 
+    // `current_branch()` returned Some, so `branch_name` is known to exist —
+    // no need to re-verify it here.
     let (ahead_parent, behind_parent) = if let Some(ref p) = parent {
-        if git.branch_exists(&branch_name)? && git.branch_exists(p)? {
+        if git.branch_exists(p)? {
             let (a, b) = git.ahead_behind(&branch_name, p)?;
             (Some(a), Some(b))
         } else {
@@ -48,12 +50,8 @@ pub fn status(
 
     let (ahead_remote, behind_remote) =
         if let Ok(Some(upstream)) = git.remote_tracking_branch(&branch_name) {
-            if git.branch_exists(&branch_name)? {
-                let (a, b) = git.ahead_behind(&branch_name, &upstream)?;
-                (Some(a), Some(b))
-            } else {
-                (None, None)
-            }
+            let (a, b) = git.ahead_behind(&branch_name, &upstream)?;
+            (Some(a), Some(b))
         } else {
             (None, None)
         };

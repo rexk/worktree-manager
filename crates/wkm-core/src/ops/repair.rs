@@ -66,10 +66,15 @@ pub fn repair(
         result.wal_cleared = true;
     }
 
+    // Enumerate all local branches in a single git call. Used below for
+    // existence checks and the `_wkm/*` orphan sweep (replaces N+1
+    // `git rev-parse --verify` subprocesses and a separate `git branch`).
+    let git_refs = git.branch_refs()?;
+
     // 3. Remove state entries for branches that no longer exist in git
     let branches_to_check: Vec<String> = wkm_state.branches.keys().cloned().collect();
     for branch in &branches_to_check {
-        if !git.branch_exists(branch)? {
+        if !git_refs.contains_key(branch) {
             wkm_state.branches.remove(branch);
             result.branches_removed.push(branch.clone());
         }
@@ -233,11 +238,13 @@ pub fn repair(
 
     // Also check for _wkm/* branches not in any worktree
     // (They might exist as regular branches without worktrees)
-    let all_wkm_branches = find_wkm_branches(git)?;
-    for branch in all_wkm_branches {
-        if !orphan_candidates.contains(&branch) && !live_parked.contains(&branch) {
-            let _ = git.delete_branch(&branch, true);
-            result.orphan_branches_deleted.push(branch);
+    for branch in git_refs.keys() {
+        if branch.starts_with("_wkm/")
+            && !orphan_candidates.contains(branch)
+            && !live_parked.contains(branch)
+        {
+            let _ = git.delete_branch(branch, true);
+            result.orphan_branches_deleted.push(branch.clone());
         }
     }
 
@@ -261,12 +268,6 @@ pub fn repair(
     state::write_state(&ctx.state_path, &wkm_state)?;
     drop(lock);
     Ok(result)
-}
-
-/// Find all branches starting with `_wkm/`.
-fn find_wkm_branches(git: &impl GitBranches) -> Result<Vec<String>, WkmError> {
-    let all = git.branch_list()?;
-    Ok(all.into_iter().filter(|b| b.starts_with("_wkm/")).collect())
 }
 
 #[cfg(test)]
