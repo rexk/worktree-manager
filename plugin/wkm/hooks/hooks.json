@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'wkm status 2>/dev/null; wkm graph 2>/dev/null; true'"
+          }
+        ]
+      }
+    ]
+  }
+}
