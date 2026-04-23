@@ -129,7 +129,7 @@ mod tests {
         let repo = TestRepo::new();
         let (ctx, state) = init_repo(&repo);
         assert!(ctx.state_path.exists());
-        assert_eq!(state.version, 1);
+        assert_eq!(state.version, 2);
         assert_eq!(state.config.base_branch, "main");
         assert!(state.branches.is_empty());
     }

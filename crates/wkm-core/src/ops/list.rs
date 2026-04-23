@@ -17,7 +17,12 @@ pub struct ListEntry {
     pub description: Option<String>,
     pub ahead_of_parent: Option<usize>,
     pub behind_parent: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace_alias: Option<String>,
 }
+
+/// Reserved built-in token that always resolves to the main worktree.
+pub const MAIN_WORKTREE_TOKEN: &str = "@main";
 
 /// List all tracked branches.
 pub fn list(
@@ -39,6 +44,14 @@ pub fn list(
             (None, None)
         };
 
+        let workspace_alias = branch.worktree_path.as_ref().and_then(|p| {
+            wkm_state
+                .workspaces
+                .iter()
+                .find(|(_, w)| w.worktree_path == *p)
+                .map(|(alias, _)| alias.clone())
+        });
+
         entries.push(ListEntry {
             name: name.clone(),
             parent: branch.parent.clone(),
@@ -47,29 +60,139 @@ pub fn list(
             description: branch.description.clone(),
             ahead_of_parent: ahead,
             behind_parent: behind,
+            workspace_alias,
         });
     }
     Ok(entries)
 }
 
-/// Get the worktree path for a branch (for `wkm wp`).
+/// Outcome of `cd_path`: the resolved path plus a hint about how it was matched.
+#[derive(Debug, Clone)]
+pub struct CdResolution {
+    pub path: PathBuf,
+    /// `Some((alias, branch_name))` when resolution chose an alias over a
+    /// shadowed branch of the same name. Useful for the CLI to emit a
+    /// one-line warning. Also populated when the user explicitly asked for
+    /// an alias; the CLI can suppress the warning when it's non-ambiguous.
+    pub alias_shadowed_branch: Option<(String, String)>,
+}
+
+/// Resolve `wkm wp` single positional argument.
 ///
-/// Returns an error if the branch is not tracked, has no worktree assigned,
-/// or the worktree directory no longer exists on disk.
-pub fn cd_path(
+/// Resolution order:
+///   1. `arg == None` or `arg == "@main"` → main worktree.
+///   2. `arg` starts with `@` but isn't `@main` → error.
+///   3. `arg` is a workspace alias → that workspace's path.
+///   4. `arg` is the base branch → main worktree.
+///   5. `arg` matches main worktree's current branch → main worktree.
+///   6. `arg` is a tracked branch with a secondary worktree → that path.
+///   7. otherwise → error.
+pub fn cd_path_resolve(
+    ctx: &RepoContext,
+    git: &impl GitDiscovery,
+    arg: Option<&str>,
+) -> Result<CdResolution, WkmError> {
+    let wkm_state = state::read_state(&ctx.state_path)?.ok_or(WkmError::NotInitialized)?;
+
+    let arg = match arg {
+        None => {
+            return Ok(CdResolution {
+                path: ctx.main_worktree.clone(),
+                alias_shadowed_branch: None,
+            });
+        }
+        Some(a) => a,
+    };
+
+    if arg == MAIN_WORKTREE_TOKEN {
+        return Ok(CdResolution {
+            path: ctx.main_worktree.clone(),
+            alias_shadowed_branch: None,
+        });
+    }
+
+    if let Some(stripped) = arg.strip_prefix('@') {
+        return Err(WkmError::Other(format!(
+            "unknown built-in token '@{stripped}'. Only '@main' is recognized"
+        )));
+    }
+
+    // Alias-first.
+    if let Some(entry) = wkm_state.workspaces.get(arg) {
+        if !entry.worktree_path.exists() {
+            return Err(WkmError::WorkspacePathMissing(
+                arg.to_string(),
+                entry.worktree_path.clone(),
+            ));
+        }
+        let shadowed = wkm_state
+            .branches
+            .get(arg)
+            .map(|_| (arg.to_string(), arg.to_string()));
+        return Ok(CdResolution {
+            path: entry.worktree_path.clone(),
+            alias_shadowed_branch: shadowed,
+        });
+    }
+
+    // Branch resolution (existing behaviour).
+    let branch = arg;
+    let path = cd_path_branch_inner(ctx, git, &wkm_state, branch)?;
+    Ok(CdResolution {
+        path,
+        alias_shadowed_branch: None,
+    })
+}
+
+/// Force branch resolution for `wkm wp -b <branch>`.
+pub fn cd_path_branch(
     ctx: &RepoContext,
     git: &impl GitDiscovery,
     branch: &str,
 ) -> Result<PathBuf, WkmError> {
     let wkm_state = state::read_state(&ctx.state_path)?.ok_or(WkmError::NotInitialized)?;
+    cd_path_branch_inner(ctx, git, &wkm_state, branch)
+}
 
-    // Check if it's the base branch (main worktree)
+/// Resolve a workspace alias only.
+pub fn cd_path_workspace(ctx: &RepoContext, alias: &str) -> Result<PathBuf, WkmError> {
+    if alias == MAIN_WORKTREE_TOKEN {
+        return Ok(ctx.main_worktree.clone());
+    }
+    let wkm_state = state::read_state(&ctx.state_path)?.ok_or(WkmError::NotInitialized)?;
+    let entry = wkm_state
+        .workspaces
+        .get(alias)
+        .ok_or_else(|| WkmError::WorkspaceNotFound(alias.to_string()))?;
+    if !entry.worktree_path.exists() {
+        return Err(WkmError::WorkspacePathMissing(
+            alias.to_string(),
+            entry.worktree_path.clone(),
+        ));
+    }
+    Ok(entry.worktree_path.clone())
+}
+
+/// Legacy branch-only alias for `cd_path_branch`. Kept for call sites that
+/// pass branch names directly.
+pub fn cd_path(
+    ctx: &RepoContext,
+    git: &impl GitDiscovery,
+    branch: &str,
+) -> Result<PathBuf, WkmError> {
+    cd_path_branch(ctx, git, branch)
+}
+
+fn cd_path_branch_inner(
+    ctx: &RepoContext,
+    git: &impl GitDiscovery,
+    wkm_state: &crate::state::types::WkmState,
+    branch: &str,
+) -> Result<PathBuf, WkmError> {
     if branch == wkm_state.config.base_branch {
         return Ok(ctx.main_worktree.clone());
     }
 
-    // Any branch currently checked out in the main worktree lives there at
-    // runtime — main-worktree hosting is inferred from git, not stored in state.
     if git.current_branch(&ctx.main_worktree)?.as_deref() == Some(branch) {
         return Ok(ctx.main_worktree.clone());
     }
@@ -89,6 +212,30 @@ pub fn cd_path(
     }
 
     Ok(path)
+}
+
+/// Resolve the branch currently hosted in the workspace `alias`. Used by
+/// mutating commands that accept `-w <alias>` as an alias for a branch.
+pub fn branch_for_workspace(
+    ctx: &RepoContext,
+    git: &impl GitDiscovery,
+    alias: &str,
+) -> Result<String, WkmError> {
+    if alias == MAIN_WORKTREE_TOKEN {
+        return Err(WkmError::Other(
+            "'@main' is not a valid workspace target for this command".to_string(),
+        ));
+    }
+    let path = cd_path_workspace(ctx, alias)?;
+    let branch = git
+        .current_branch(&path)?
+        .ok_or_else(|| WkmError::Other(format!("workspace '{alias}' is in detached HEAD state")))?;
+    if branch.starts_with("_wkm/parked/") {
+        return Err(WkmError::Other(format!(
+            "workspace '{alias}' is parked on '{branch}' — start a new branch via `wkm checkout -b <name>` first"
+        )));
+    }
+    Ok(branch)
 }
 
 #[cfg(test)]

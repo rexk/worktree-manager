@@ -11,6 +11,9 @@ use crate::ui;
 pub struct MergeArgs {
     /// Branch to merge (omit for --all)
     pub branch: Option<String>,
+    /// Merge the branch currently in the named workspace
+    #[arg(short = 'w', long = "workspace", conflicts_with_all = ["all", "abort", "branch"])]
+    pub workspace: Option<String>,
     /// Merge all children
     #[arg(long)]
     pub all: bool,
@@ -51,9 +54,13 @@ pub fn run(args: &MergeArgs) -> anyhow::Result<()> {
                 println!("Merged: {}", merged.join(", "));
             }
         } else {
-            let branch = match &args.branch {
-                Some(b) => b.clone(),
-                None => pick_child(&ctx, &git, &cwd)?,
+            let branch = if let Some(alias) = &args.workspace {
+                wkm_core::ops::list::branch_for_workspace(&ctx, &git, alias)?
+            } else {
+                match &args.branch {
+                    Some(b) => b.clone(),
+                    None => pick_child(&ctx, &git, &cwd)?,
+                }
             };
             merge::merge(&ctx, &git, &cwd, &branch, strategy)?;
             println!("Merged '{branch}'");

@@ -55,7 +55,7 @@ mod tests {
         let state = WkmState::new(WkmConfig::new("main"));
         write_state(&path, &state).unwrap();
         let loaded = read_state(&path).unwrap().unwrap();
-        assert_eq!(loaded.version, 1);
+        assert_eq!(loaded.version, 2);
         assert_eq!(loaded.config.base_branch, "main");
     }
 

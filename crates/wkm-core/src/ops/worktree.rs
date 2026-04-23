@@ -6,7 +6,7 @@ use crate::git::{GitBranches, GitDiscovery, GitWorktrees};
 use crate::repo::RepoContext;
 use crate::state;
 use crate::state::lock::WkmLock;
-use crate::state::types::{BranchEntry, WorktreeBackend};
+use crate::state::types::{BranchEntry, WorkspaceEntry, WorktreeBackend};
 
 /// Options for creating a worktree.
 pub struct CreateOptions {
@@ -16,6 +16,8 @@ pub struct CreateOptions {
     pub base: Option<String>,
     /// Description for the branch.
     pub description: Option<String>,
+    /// Optional workspace alias to attach to the new worktree.
+    pub name: Option<String>,
 }
 
 /// Result of worktree creation.
@@ -31,6 +33,11 @@ pub fn create(
     git: &(impl GitDiscovery + GitBranches + GitWorktrees),
     opts: &CreateOptions,
 ) -> Result<CreateResult, WkmError> {
+    // Validate the alias up front so we fail before touching git/disk.
+    if let Some(ref alias) = opts.name {
+        encoding::validate_workspace_alias(alias).map_err(WkmError::InvalidWorkspaceAlias)?;
+    }
+
     let lock = WkmLock::acquire(&ctx.lock_path)?;
 
     let mut wkm_state = state::read_state(&ctx.state_path)?.ok_or(WkmError::NotInitialized)?;
@@ -38,6 +45,16 @@ pub fn create(
     // Check for in-progress operation
     if wkm_state.wal.is_some() {
         return Err(WkmError::OperationInProgress);
+    }
+
+    // Reject duplicate aliases before creating anything.
+    if let Some(ref alias) = opts.name
+        && let Some(existing) = wkm_state.workspaces.get(alias)
+    {
+        return Err(WkmError::WorkspaceAliasExists(
+            alias.clone(),
+            existing.worktree_path.clone(),
+        ));
     }
 
     // Determine the parent branch
@@ -115,10 +132,20 @@ pub fn create(
             stash_commit: None,
             jj_workspace_name,
             description: opts.description.clone(),
-            created_at: now,
+            created_at: now.clone(),
             previous_branch: None,
         },
     );
+    if let Some(ref alias) = opts.name {
+        wkm_state.workspaces.insert(
+            alias.clone(),
+            WorkspaceEntry {
+                worktree_path: worktree_path.clone(),
+                created_at: now,
+                description: None,
+            },
+        );
+    }
     state::write_state(&ctx.state_path, &wkm_state)?;
 
     drop(lock);
@@ -200,6 +227,11 @@ pub fn remove(
 
     // Drop the wkm state entry entirely — the git branch itself is preserved.
     wkm_state.branches.remove(&branch_name);
+    // Drop any workspace alias pointing at this directory.
+    let worktree_path_ref = worktree_path.clone();
+    wkm_state
+        .workspaces
+        .retain(|_, v| v.worktree_path != worktree_path_ref);
     state::write_state(&ctx.state_path, &wkm_state)?;
 
     // Try to rename the worktree directory for background deletion.
@@ -341,6 +373,7 @@ mod tests {
                 branch: "feature".to_string(),
                 base: None,
                 description: None,
+                name: None,
             },
         )
         .unwrap();
@@ -369,6 +402,7 @@ mod tests {
                 branch: "existing".to_string(),
                 base: None,
                 description: None,
+                name: None,
             },
         )
         .unwrap();
@@ -389,6 +423,7 @@ mod tests {
                 branch: "feature".to_string(),
                 base: None,
                 description: None,
+                name: None,
             },
         )
         .unwrap();
@@ -401,6 +436,7 @@ mod tests {
                 branch: "feature".to_string(),
                 base: None,
                 description: None,
+                name: None,
             },
         );
 
@@ -419,6 +455,7 @@ mod tests {
                 branch: "feature".to_string(),
                 base: Some("develop".to_string()),
                 description: None,
+                name: None,
             },
         )
         .unwrap();
@@ -442,6 +479,7 @@ mod tests {
                 branch: "feature".to_string(),
                 base: None,
                 description: None,
+                name: None,
             },
         )
         .unwrap();
@@ -491,6 +529,7 @@ mod tests {
                 branch: "feature".to_string(),
                 base: None,
                 description: None,
+                name: None,
             },
         )
         .unwrap();
@@ -536,6 +575,7 @@ mod tests {
                 branch: "feature".to_string(),
                 base: None,
                 description: None,
+                name: None,
             },
         )
         .unwrap();
@@ -579,6 +619,7 @@ mod tests {
                 branch: "feature".to_string(),
                 base: None,
                 description: None,
+                name: None,
             },
         )
         .unwrap();
@@ -619,6 +660,7 @@ mod tests {
                 branch: "feature-a".to_string(),
                 base: None,
                 description: None,
+                name: None,
             },
         )
         .unwrap();
@@ -630,6 +672,7 @@ mod tests {
                 branch: "feature-b".to_string(),
                 base: None,
                 description: None,
+                name: None,
             },
         )
         .unwrap();
@@ -649,6 +692,7 @@ mod tests {
                 branch: "feature".to_string(),
                 base: None,
                 description: None,
+                name: None,
             },
         )
         .unwrap();

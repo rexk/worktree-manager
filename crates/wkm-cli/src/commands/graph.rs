@@ -37,24 +37,38 @@ pub fn run(args: &GraphArgs) -> anyhow::Result<()> {
             let main_wt = ctx.main_worktree.clone();
 
             let annotate = move |name: &str| -> Option<String> {
+                let alias_for_path = |p: &std::path::Path| -> Option<String> {
+                    wkm_state
+                        .workspaces
+                        .iter()
+                        .find(|(_, v)| v.worktree_path == p)
+                        .map(|(k, _)| k.clone())
+                };
                 if args.long {
                     if name == base_branch {
-                        Some(tilde_path(&main_wt))
+                        // Main worktree always has the `@main` handle.
+                        Some(format!("{}  alias: @main", tilde_path(&main_wt)))
                     } else {
                         wkm_state
                             .branches
                             .get(name)
                             .and_then(|e| e.worktree_path.as_ref())
-                            .map(|p| tilde_path(p))
+                            .map(|p| match alias_for_path(p) {
+                                Some(a) => format!("{}  alias: {a}", tilde_path(p)),
+                                None => tilde_path(p),
+                            })
                     }
                 } else if name == base_branch {
-                    Some("wt".to_string())
+                    Some("wt @main".to_string())
                 } else {
                     wkm_state
                         .branches
                         .get(name)
                         .and_then(|e| e.worktree_path.as_ref())
-                        .map(|_| "wt".to_string())
+                        .map(|p| match alias_for_path(p) {
+                            Some(a) => format!("wt:{a}"),
+                            None => "wt".to_string(),
+                        })
                 }
             };
 
