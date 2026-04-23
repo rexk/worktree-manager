@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wkm status:*)",
+      "Bash(wkm list:*)",
+      "Bash(wkm ls:*)",
+      "Bash(wkm graph:*)",
+      "Bash(wkm worktree-path:*)",
+      "Bash(wkm wp:*)",
+      "Bash(wkm stash list:*)",
+      "Bash(wkm config get:*)",
+      "Bash(wkm config list:*)"
+    ]
+  }
+}

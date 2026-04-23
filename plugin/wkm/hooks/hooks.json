@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "NO_COLOR=1 wkm status 2>/dev/null; NO_COLOR=1 wkm graph 2>/dev/null; true"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "wkm",
+  "version": "0.1.0",
+  "description": "Slash commands, session context, and permission presets for the wkm worktree manager CLI.",
+  "author": {
+    "name": "worktree-manager"
+  },
+  "repository": "https://github.com/rexk/worktree-manager",
+  "keywords": ["wkm", "worktree", "git", "rebase", "branch"]
+}
