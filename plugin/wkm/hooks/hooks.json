@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh -c 'wkm status 2>/dev/null; wkm graph 2>/dev/null; true'"
+            "command": "NO_COLOR=1 wkm status 2>/dev/null; NO_COLOR=1 wkm graph 2>/dev/null; true"
           }
         ]
       }

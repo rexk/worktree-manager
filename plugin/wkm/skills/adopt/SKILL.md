@@ -24,7 +24,7 @@ Pass everything through to wkm verbatim after sanity-checking.
 2. Dispatch:
    - **`--all`** (optionally with `--parent`): `wkm adopt --all [--parent <p>]`.
    - **Explicit branches**: `wkm adopt <b1> <b2> ... [--parent <p>]`.
-   - **No args**: wkm enters an interactive picker, which will not work from Claude. Instead:
+   - **No args**: in a non-TTY (which Claude always is), wkm aborts with `Specify one or more branches, or use --all`. Don't run the bare command; instead:
      - Run `wkm adopt --all` after confirming with the user, **or**
      - Ask the user which branches they want to adopt.
 3. Echo wkm's output. Each adopted branch prints `Adopted '<name>'`; skipped ones print `Skipped '<name>' (already tracked)`.
@@ -33,4 +33,4 @@ Pass everything through to wkm verbatim after sanity-checking.
 ## Notes
 
 - wkm only adopts **local** branches. If the user wants to adopt `origin/foo`, they need to `git checkout -b foo origin/foo` first.
-- wkm will not adopt a branch whose name starts with `_wkm/` — those are internal markers.
+- `wkm adopt --all` filters out branches whose names start with `_wkm/` (internal markers). Explicit `wkm adopt _wkm/foo` is *not* blocked by the CLI — if the user asks for that, warn them it's likely a mistake before running.

@@ -31,7 +31,7 @@ Parse defensively:
 ## When to refuse / escalate
 
 - If `wkm status` shows `In progress: <op>`, stop. Tell the user to finish or abort the in-progress op (`wkm sync --continue|--abort`, `wkm merge --abort`) before starting a new branch.
-- If the current worktree is dirty and the user asked for the no-worktree form, `wkm checkout -b` will auto-stash; that is fine, but mention it so the user is not surprised later.
+- If the current worktree is dirty and the user asked for the no-worktree form, `wkm checkout -b` creates the branch at HEAD and keeps the working changes on it (no stash). Mention this so the user isn't surprised to see their in-progress edits on the new branch.
 - If wkm is not initialized (`Not initialized` error), stop and ask whether to run `wkm init` first.
 
 ## Examples
