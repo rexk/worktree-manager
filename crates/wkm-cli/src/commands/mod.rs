@@ -1,4 +1,5 @@
 pub mod adopt;
+pub mod alias;
 pub mod cd;
 pub mod checkout;
 pub mod config;
@@ -14,5 +15,4 @@ pub mod shell_setup;
 pub mod stash;
 pub mod status;
 pub mod sync;
-pub mod workspace;
 pub mod worktree;

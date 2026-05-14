@@ -11,9 +11,9 @@ pub struct SetParentArgs {
     pub new_parent: String,
     /// Branch to reparent (defaults to current branch)
     pub branch: Option<String>,
-    /// Reparent the branch currently hosted in the named workspace
-    #[arg(short = 'w', long = "workspace", conflicts_with = "branch")]
-    pub workspace: Option<String>,
+    /// Reparent the branch currently hosted in the aliased worktree
+    #[arg(short = 'a', long = "alias", conflicts_with = "branch")]
+    pub alias: Option<String>,
 }
 
 pub fn run(args: &SetParentArgs) -> anyhow::Result<()> {
@@ -21,8 +21,8 @@ pub fn run(args: &SetParentArgs) -> anyhow::Result<()> {
     let ctx = RepoContext::from_path(&cwd)?;
 
     with_backend!(ctx, &cwd, git => {
-        let branch = if let Some(alias) = &args.workspace {
-            wkm_core::ops::list::branch_for_workspace(&ctx, &git, alias)?
+        let branch = if let Some(alias) = &args.alias {
+            wkm_core::ops::list::branch_for_alias(&ctx, &git, alias)?
         } else {
             match &args.branch {
                 Some(b) => b.clone(),

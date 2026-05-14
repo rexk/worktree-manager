@@ -7,45 +7,45 @@ use crate::error::WkmError;
 use crate::repo::RepoContext;
 use crate::state;
 use crate::state::lock::WkmLock;
-use crate::state::types::WorkspaceEntry;
+use crate::state::types::AliasEntry;
 
-/// One entry in the `wkm workspace list` output.
+/// One entry in the `wkm alias list` output.
 #[derive(Debug, Clone, Serialize)]
-pub struct WorkspaceInfo {
+pub struct AliasInfo {
     pub alias: String,
     pub worktree_path: PathBuf,
     pub description: Option<String>,
     pub created_at: String,
     /// `true` when the stored directory no longer exists on disk.
     pub stale: bool,
-    /// The branch currently checked out in the workspace (if any).
+    /// The branch currently checked out in the aliased worktree (if any).
     pub current_branch: Option<String>,
 }
 
 /// Where a new alias should point.
-pub enum WorkspaceTarget<'a> {
+pub enum AliasTarget<'a> {
     /// A tracked branch name — resolves to that branch's secondary worktree.
     Branch(&'a str),
     /// An explicit directory path (typically `cwd`).
     Path(&'a Path),
 }
 
-/// List all registered workspace aliases.
+/// List all registered aliases.
 pub fn list(
     ctx: &RepoContext,
     git: &impl crate::git::GitDiscovery,
-) -> Result<Vec<WorkspaceInfo>, WkmError> {
+) -> Result<Vec<AliasInfo>, WkmError> {
     let wkm_state = state::read_state(&ctx.state_path)?.ok_or(WkmError::NotInitialized)?;
 
-    let mut out = Vec::with_capacity(wkm_state.workspaces.len());
-    for (alias, entry) in &wkm_state.workspaces {
+    let mut out = Vec::with_capacity(wkm_state.aliases.len());
+    for (alias, entry) in &wkm_state.aliases {
         let stale = !entry.worktree_path.exists();
         let current_branch = if stale {
             None
         } else {
             git.current_branch(&entry.worktree_path).ok().flatten()
         };
-        out.push(WorkspaceInfo {
+        out.push(AliasInfo {
             alias: alias.clone(),
             worktree_path: entry.worktree_path.clone(),
             description: entry.description.clone(),
@@ -60,12 +60,21 @@ pub fn list(
 /// Create or reuse an alias pointing at the given target.
 ///
 /// Errors if:
-/// - the alias fails validation,
+/// - the alias name fails validation,
 /// - the target is the main worktree,
 /// - the resolved path isn't a known secondary worktree,
 /// - another alias already points somewhere else.
-pub fn set(ctx: &RepoContext, alias: &str, target: WorkspaceTarget<'_>) -> Result<(), WkmError> {
-    encoding::validate_workspace_alias(alias).map_err(WkmError::InvalidWorkspaceAlias)?;
+///
+/// For `AliasTarget::Path`, when cwd is a real git worktree but the wkm state
+/// has the wrong path recorded for its branch, the error explicitly tells the
+/// user to run `wkm repair` rather than parroting the invariant.
+pub fn set(
+    ctx: &RepoContext,
+    git: &(impl crate::git::GitDiscovery + crate::git::GitWorktrees),
+    alias: &str,
+    target: AliasTarget<'_>,
+) -> Result<(), WkmError> {
+    encoding::validate_alias(alias).map_err(WkmError::InvalidAlias)?;
 
     let lock = WkmLock::acquire(&ctx.lock_path)?;
     let mut wkm_state = state::read_state(&ctx.state_path)?.ok_or(WkmError::NotInitialized)?;
@@ -75,7 +84,7 @@ pub fn set(ctx: &RepoContext, alias: &str, target: WorkspaceTarget<'_>) -> Resul
     }
 
     let path = match target {
-        WorkspaceTarget::Branch(branch) => {
+        AliasTarget::Branch(branch) => {
             let entry = wkm_state
                 .branches
                 .get(branch)
@@ -85,37 +94,34 @@ pub fn set(ctx: &RepoContext, alias: &str, target: WorkspaceTarget<'_>) -> Resul
                 .clone()
                 .ok_or_else(|| WkmError::NoWorktree(branch.to_string()))?
         }
-        WorkspaceTarget::Path(p) => {
+        AliasTarget::Path(p) => {
             let canon = p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
             if canon == ctx.main_worktree {
                 return Err(WkmError::Other(
                     "cannot alias the main worktree (use '@main' to navigate there)".to_string(),
                 ));
             }
-            // The path must match an existing secondary worktree tracked by wkm.
-            let matching = wkm_state
+            let matches_state = wkm_state
                 .branches
                 .values()
                 .any(|b| b.worktree_path.as_deref() == Some(canon.as_path()));
-            if !matching {
-                return Err(WkmError::Other(format!(
-                    "path {} is not a wkm-managed secondary worktree",
-                    canon.display()
-                )));
+            if matches_state {
+                canon
+            } else {
+                return Err(diagnose_unknown_path(git, &wkm_state, &canon));
             }
-            canon
         }
     };
 
     if !path.exists() {
-        return Err(WkmError::WorkspacePathMissing(alias.to_string(), path));
+        return Err(WkmError::AliasPathMissing(alias.to_string(), path));
     }
 
-    // Duplicate alias pointing elsewhere? Reject.
-    if let Some(existing) = wkm_state.workspaces.get(alias)
+    // Same alias already pointing elsewhere? Reject.
+    if let Some(existing) = wkm_state.aliases.get(alias)
         && existing.worktree_path != path
     {
-        return Err(WkmError::WorkspaceAliasExists(
+        return Err(WkmError::AliasExists(
             alias.to_string(),
             existing.worktree_path.clone(),
         ));
@@ -123,7 +129,7 @@ pub fn set(ctx: &RepoContext, alias: &str, target: WorkspaceTarget<'_>) -> Resul
 
     // Another alias already owns this path? Reject (one alias per worktree).
     if let Some((other_alias, _)) = wkm_state
-        .workspaces
+        .aliases
         .iter()
         .find(|(k, v)| k.as_str() != alias && v.worktree_path == path)
     {
@@ -133,9 +139,9 @@ pub fn set(ctx: &RepoContext, alias: &str, target: WorkspaceTarget<'_>) -> Resul
     }
 
     let now = chrono::Utc::now().to_rfc3339();
-    wkm_state.workspaces.insert(
+    wkm_state.aliases.insert(
         alias.to_string(),
-        WorkspaceEntry {
+        AliasEntry {
             worktree_path: path,
             created_at: now,
             description: None,
@@ -146,9 +152,62 @@ pub fn set(ctx: &RepoContext, alias: &str, target: WorkspaceTarget<'_>) -> Resul
     Ok(())
 }
 
+/// Build an actionable error for a path that no tracked branch claims.
+///
+/// Three flavors:
+/// - cwd *is* a wkm-tracked branch's git worktree but state has the wrong path → stale state, run `wkm repair`.
+/// - cwd is some other branch's git worktree, not tracked → adopt it.
+/// - cwd isn't a git worktree at all → create or pass `--branch`.
+fn diagnose_unknown_path(
+    git: &(impl crate::git::GitDiscovery + crate::git::GitWorktrees),
+    wkm_state: &crate::state::types::WkmState,
+    canon: &Path,
+) -> WkmError {
+    let worktrees = match git.worktree_list() {
+        Ok(wts) => wts,
+        Err(_) => {
+            return WkmError::Other(format!(
+                "no tracked branch has a worktree at {}. Create one with `wkm worktree create` or pass --branch <name>.",
+                canon.display()
+            ));
+        }
+    };
+
+    let Some(wt) = worktrees.iter().find(|wt| wt.path == *canon) else {
+        return WkmError::Other(format!(
+            "no tracked branch has a worktree at {}. Create one with `wkm worktree create` or pass --branch <name>.",
+            canon.display()
+        ));
+    };
+
+    let Some(branch) = wt.branch.as_deref() else {
+        return WkmError::Other(format!(
+            "worktree at {} is in detached HEAD state; aliases require a branch.",
+            canon.display()
+        ));
+    };
+
+    match wkm_state.branches.get(branch) {
+        Some(entry) => {
+            let recorded = match &entry.worktree_path {
+                Some(p) => p.display().to_string(),
+                None => "<none>".to_string(),
+            };
+            WkmError::Other(format!(
+                "wkm state is stale for branch '{branch}': recorded worktree_path = {recorded}, but it actually lives at {}. Run `wkm repair` and retry.",
+                canon.display()
+            ))
+        }
+        None => WkmError::Other(format!(
+            "branch '{branch}' at {} is not tracked by wkm. Run `wkm adopt {branch}` first.",
+            canon.display()
+        )),
+    }
+}
+
 /// Rename an alias. Errors if `old` is unknown or `new` is already taken.
 pub fn rename(ctx: &RepoContext, old: &str, new: &str) -> Result<(), WkmError> {
-    encoding::validate_workspace_alias(new).map_err(WkmError::InvalidWorkspaceAlias)?;
+    encoding::validate_alias(new).map_err(WkmError::InvalidAlias)?;
 
     let lock = WkmLock::acquire(&ctx.lock_path)?;
     let mut wkm_state = state::read_state(&ctx.state_path)?.ok_or(WkmError::NotInitialized)?;
@@ -161,19 +220,19 @@ pub fn rename(ctx: &RepoContext, old: &str, new: &str) -> Result<(), WkmError> {
         return Ok(());
     }
 
-    if wkm_state.workspaces.contains_key(new) {
-        let existing = &wkm_state.workspaces[new];
-        return Err(WkmError::WorkspaceAliasExists(
+    if wkm_state.aliases.contains_key(new) {
+        let existing = &wkm_state.aliases[new];
+        return Err(WkmError::AliasExists(
             new.to_string(),
             existing.worktree_path.clone(),
         ));
     }
 
     let entry = wkm_state
-        .workspaces
+        .aliases
         .remove(old)
-        .ok_or_else(|| WkmError::WorkspaceNotFound(old.to_string()))?;
-    wkm_state.workspaces.insert(new.to_string(), entry);
+        .ok_or_else(|| WkmError::AliasNotFound(old.to_string()))?;
+    wkm_state.aliases.insert(new.to_string(), entry);
     state::write_state(&ctx.state_path, &wkm_state)?;
     drop(lock);
     Ok(())
@@ -189,9 +248,9 @@ pub fn clear(ctx: &RepoContext, alias: &str) -> Result<(), WkmError> {
     }
 
     wkm_state
-        .workspaces
+        .aliases
         .remove(alias)
-        .ok_or_else(|| WkmError::WorkspaceNotFound(alias.to_string()))?;
+        .ok_or_else(|| WkmError::AliasNotFound(alias.to_string()))?;
     state::write_state(&ctx.state_path, &wkm_state)?;
     drop(lock);
     Ok(())
@@ -200,7 +259,7 @@ pub fn clear(ctx: &RepoContext, alias: &str) -> Result<(), WkmError> {
 /// Return the alias pointing at `path`, if any.
 pub fn alias_for_path(wkm_state: &crate::state::types::WkmState, path: &Path) -> Option<String> {
     wkm_state
-        .workspaces
+        .aliases
         .iter()
         .find(|(_, v)| v.worktree_path == path)
         .map(|(k, _)| k.clone())
@@ -237,24 +296,24 @@ mod tests {
         )
         .unwrap();
 
-        set(&ctx, "specs", WorkspaceTarget::Branch("feat")).unwrap();
+        set(&ctx, &git, "specs", AliasTarget::Branch("feat")).unwrap();
 
         let state = state::read_state(&ctx.state_path).unwrap().unwrap();
-        assert!(state.workspaces.contains_key("specs"));
+        assert!(state.aliases.contains_key("specs"));
     }
 
     #[test]
     fn set_rejects_invalid_alias() {
-        let (_repo, ctx, _git) = setup();
-        let err = set(&ctx, "@main", WorkspaceTarget::Branch("anything"));
-        assert!(matches!(err, Err(WkmError::InvalidWorkspaceAlias(_))));
+        let (_repo, ctx, git) = setup();
+        let err = set(&ctx, &git, "@main", AliasTarget::Branch("anything"));
+        assert!(matches!(err, Err(WkmError::InvalidAlias(_))));
     }
 
     #[test]
     fn set_rejects_main_worktree_path() {
-        let (_repo, ctx, _git) = setup();
+        let (_repo, ctx, git) = setup();
         let main = ctx.main_worktree.clone();
-        let err = set(&ctx, "home", WorkspaceTarget::Path(&main));
+        let err = set(&ctx, &git, "home", AliasTarget::Path(&main));
         assert!(err.is_err());
     }
 
@@ -284,9 +343,9 @@ mod tests {
         )
         .unwrap();
 
-        set(&ctx, "specs", WorkspaceTarget::Branch("feat-a")).unwrap();
-        let err = set(&ctx, "specs", WorkspaceTarget::Branch("feat-b"));
-        assert!(matches!(err, Err(WkmError::WorkspaceAliasExists(_, _))));
+        set(&ctx, &git, "specs", AliasTarget::Branch("feat-a")).unwrap();
+        let err = set(&ctx, &git, "specs", AliasTarget::Branch("feat-b"));
+        assert!(matches!(err, Err(WkmError::AliasExists(_, _))));
     }
 
     #[test]
@@ -303,13 +362,13 @@ mod tests {
             },
         )
         .unwrap();
-        set(&ctx, "specs", WorkspaceTarget::Branch("feat")).unwrap();
+        set(&ctx, &git, "specs", AliasTarget::Branch("feat")).unwrap();
 
         rename(&ctx, "specs", "scratch").unwrap();
 
         let state = state::read_state(&ctx.state_path).unwrap().unwrap();
-        assert!(!state.workspaces.contains_key("specs"));
-        assert!(state.workspaces.contains_key("scratch"));
+        assert!(!state.aliases.contains_key("specs"));
+        assert!(state.aliases.contains_key("scratch"));
     }
 
     #[test]
@@ -337,11 +396,11 @@ mod tests {
             },
         )
         .unwrap();
-        set(&ctx, "a", WorkspaceTarget::Branch("feat-a")).unwrap();
-        set(&ctx, "b", WorkspaceTarget::Branch("feat-b")).unwrap();
+        set(&ctx, &git, "a", AliasTarget::Branch("feat-a")).unwrap();
+        set(&ctx, &git, "b", AliasTarget::Branch("feat-b")).unwrap();
 
         let err = rename(&ctx, "a", "b");
-        assert!(matches!(err, Err(WkmError::WorkspaceAliasExists(_, _))));
+        assert!(matches!(err, Err(WkmError::AliasExists(_, _))));
     }
 
     #[test]
@@ -364,7 +423,7 @@ mod tests {
         clear(&ctx, "specs").unwrap();
 
         let state = state::read_state(&ctx.state_path).unwrap().unwrap();
-        assert!(!state.workspaces.contains_key("specs"));
+        assert!(!state.aliases.contains_key("specs"));
         assert!(created.worktree_path.exists());
     }
 
@@ -372,7 +431,7 @@ mod tests {
     fn clear_unknown_errors() {
         let (_repo, ctx, _git) = setup();
         let err = clear(&ctx, "missing");
-        assert!(matches!(err, Err(WkmError::WorkspaceNotFound(_))));
+        assert!(matches!(err, Err(WkmError::AliasNotFound(_))));
     }
 
     #[test]
@@ -392,11 +451,96 @@ mod tests {
 
         // Simulate the path going away out-of-band.
         let mut state = state::read_state(&ctx.state_path).unwrap().unwrap();
-        state.workspaces.get_mut("specs").unwrap().worktree_path =
+        state.aliases.get_mut("specs").unwrap().worktree_path =
             PathBuf::from("/tmp/wkm-nonexistent-alias-path-99999");
         state::write_state(&ctx.state_path, &state).unwrap();
 
         let rows = list(&ctx, &git).unwrap();
         assert!(rows.iter().any(|w| w.alias == "specs" && w.stale));
+    }
+
+    #[test]
+    fn set_from_path_reports_stale_state_when_state_disagrees_with_git() {
+        // Create a tracked branch with a real secondary worktree, then poison
+        // the recorded `worktree_path` so it disagrees with git. Calling `set`
+        // from inside the actual worktree should produce a "stale state, run
+        // `wkm repair`" error — not the generic "not a wkm-managed worktree".
+        let (_repo, ctx, git) = setup();
+        let created = worktree::create(
+            &ctx,
+            &git,
+            &CreateOptions {
+                branch: "feat".to_string(),
+                base: None,
+                description: None,
+                name: None,
+            },
+        )
+        .unwrap();
+
+        let mut state = state::read_state(&ctx.state_path).unwrap().unwrap();
+        state.branches.get_mut("feat").unwrap().worktree_path =
+            Some(PathBuf::from("/tmp/wkm-stale-path-xyz"));
+        state::write_state(&ctx.state_path, &state).unwrap();
+
+        let err = set(
+            &ctx,
+            &git,
+            "specs",
+            AliasTarget::Path(&created.worktree_path),
+        );
+        let msg = match err {
+            Err(WkmError::Other(m)) => m,
+            other => panic!("expected Other error, got {other:?}"),
+        };
+        assert!(
+            msg.contains("stale") && msg.contains("wkm repair"),
+            "error should mention stale state and `wkm repair`, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn set_from_path_reports_untracked_branch() {
+        // Create a worktree manually (bypassing wkm) and run set from inside.
+        // The diagnostic should say "not tracked, run `wkm adopt`".
+        let (_repo, ctx, git) = setup();
+        let scratch_root = tempfile::tempdir().unwrap();
+        let scratch_dir = scratch_root.path().join("untracked-wt");
+        wkm_sandbox::git(
+            &ctx.main_worktree,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                "feat-untracked",
+                scratch_dir.to_str().unwrap(),
+            ],
+        );
+        let canon = scratch_dir.canonicalize().unwrap_or(scratch_dir.clone());
+
+        let err = set(&ctx, &git, "tag", AliasTarget::Path(&canon));
+        let msg = match err {
+            Err(WkmError::Other(m)) => m,
+            other => panic!("expected Other error, got {other:?}"),
+        };
+        assert!(
+            msg.contains("not tracked by wkm") && msg.contains("wkm adopt"),
+            "error should mention adopt, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn set_from_random_path_reports_no_worktree() {
+        let (_repo, ctx, git) = setup();
+        let tmp = tempfile::tempdir().unwrap();
+        let err = set(&ctx, &git, "tag", AliasTarget::Path(tmp.path()));
+        let msg = match err {
+            Err(WkmError::Other(m)) => m,
+            other => panic!("expected Other error, got {other:?}"),
+        };
+        assert!(
+            msg.contains("no tracked branch has a worktree at"),
+            "error should mention no tracked worktree at the path, got: {msg}"
+        );
     }
 }

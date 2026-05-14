@@ -48,8 +48,8 @@ enum Commands {
     Drop(commands::drop_branch::DropArgs),
     /// Manage stashes
     Stash(commands::stash::StashArgs),
-    /// Manage workspace aliases
-    Workspace(commands::workspace::WorkspaceArgs),
+    /// Manage named aliases for secondary worktrees
+    Alias(commands::alias::AliasArgs),
     /// Repair wkm state
     Repair(commands::repair::RepairArgs),
     /// Get or set config values
@@ -82,7 +82,7 @@ fn main() -> anyhow::Result<()> {
         Commands::SetParent(args) => commands::set_parent::run(args),
         Commands::Drop(args) => commands::drop_branch::run(args),
         Commands::Stash(args) => commands::stash::run(args),
-        Commands::Workspace(args) => commands::workspace::run(args),
+        Commands::Alias(args) => commands::alias::run(args),
         Commands::Repair(args) => commands::repair::run(args),
         Commands::Config(args) => commands::config::run(args),
         Commands::Completions { shell } => {

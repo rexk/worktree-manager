@@ -93,7 +93,7 @@ fn worktree_create_with_name_registers_alias() {
 
     let (stdout, _) = run_ok(&repo, &["worktree", "create", "feat", "--name", "specs"]);
     assert!(
-        stdout.contains("Workspace alias: specs"),
+        stdout.contains("Alias: specs"),
         "unexpected stdout: {stdout}"
     );
 
@@ -101,20 +101,20 @@ fn worktree_create_with_name_registers_alias() {
     let (stdout, _) = run_ok(&repo, &["wp", "specs"]);
     assert!(stdout.trim().ends_with("/repo") || !stdout.trim().is_empty());
 
-    // Alias appears in `workspace list`.
-    let (stdout, _) = run_ok(&repo, &["workspace", "list"]);
-    assert!(stdout.contains("specs"), "workspace list output: {stdout}");
+    // Alias appears in `alias list`.
+    let (stdout, _) = run_ok(&repo, &["alias", "list"]);
+    assert!(stdout.contains("specs"), "alias list output: {stdout}");
 }
 
 #[test]
-fn workspace_rename_and_clear() {
+fn alias_rename_and_clear() {
     let repo = TestRepo::new();
     init(&repo);
 
     run_ok(&repo, &["worktree", "create", "feat", "--name", "specs"]);
-    run_ok(&repo, &["workspace", "rename", "specs", "scratch"]);
+    run_ok(&repo, &["alias", "rename", "specs", "scratch"]);
 
-    let (stdout, _) = run_ok(&repo, &["workspace", "list"]);
+    let (stdout, _) = run_ok(&repo, &["alias", "list"]);
     assert!(stdout.contains("scratch"));
     assert!(!stdout.contains("specs"));
 
@@ -123,8 +123,8 @@ fn workspace_rename_and_clear() {
     let content = std::fs::read_to_string(&state_path).unwrap();
     assert!(content.contains("scratch"));
 
-    run_ok(&repo, &["workspace", "clear", "scratch"]);
-    let (stdout, _) = run_ok(&repo, &["workspace", "list"]);
+    run_ok(&repo, &["alias", "clear", "scratch"]);
+    let (stdout, _) = run_ok(&repo, &["alias", "list"]);
     assert!(!stdout.contains("scratch"));
 }
 
@@ -135,7 +135,7 @@ fn wp_warns_on_alias_branch_collision() {
 
     // A tracked branch literally named `specs`.
     run_ok(&repo, &["worktree", "create", "specs"]);
-    // Plus a workspace alias "specs" on a different worktree.
+    // Plus an alias "specs" on a different worktree.
     run_ok(&repo, &["worktree", "create", "other", "--name", "specs"]);
 
     let output = run(&repo, &["wp", "specs"]);
@@ -154,7 +154,7 @@ fn wp_force_branch_bypasses_alias() {
 
     // A tracked branch named "specs" via worktree create.
     run_ok(&repo, &["worktree", "create", "specs"]);
-    // And a workspace alias "specs" pointing at a different worktree.
+    // And an alias "specs" pointing at a different worktree.
     run_ok(
         &repo,
         &["worktree", "create", "other-branch", "--name", "specs"],

@@ -7,15 +7,15 @@ use crate::ui;
 
 #[derive(Args)]
 pub struct CdArgs {
-    /// Branch name, workspace alias, or `@main`.
+    /// Branch name, alias, or `@main`.
     /// Omit to go to the main worktree.
     pub target: Option<String>,
     /// Force branch resolution (useful when an alias shadows a branch name).
-    #[arg(short = 'b', long = "branch", conflicts_with = "workspace")]
+    #[arg(short = 'b', long = "branch", conflicts_with = "alias")]
     pub branch: bool,
-    /// Force workspace-alias resolution (rarely needed; `@main` is always the main worktree).
-    #[arg(short = 'w', long = "workspace", conflicts_with = "branch")]
-    pub workspace: bool,
+    /// Force alias resolution (rarely needed; `@main` is always the main worktree).
+    #[arg(short = 'a', long = "alias", conflicts_with = "branch")]
+    pub alias: bool,
 }
 
 pub fn run(args: &CdArgs, hint: bool) -> anyhow::Result<()> {
@@ -24,8 +24,8 @@ pub fn run(args: &CdArgs, hint: bool) -> anyhow::Result<()> {
 
     let target = match &args.target {
         Some(t) => Some(t.clone()),
-        None if args.branch || args.workspace => {
-            anyhow::bail!("--branch/--workspace requires a name");
+        None if args.branch || args.alias => {
+            anyhow::bail!("--branch/--alias requires a name");
         }
         None if ui::is_interactive() => Some(pick_target(&ctx)?),
         None => None,
@@ -34,13 +34,13 @@ pub fn run(args: &CdArgs, hint: bool) -> anyhow::Result<()> {
     with_backend!(ctx, &cwd, git => {
         let path = if args.branch {
             list::cd_path_branch(&ctx, &git, target.as_deref().unwrap())?
-        } else if args.workspace {
-            list::cd_path_workspace(&ctx, target.as_deref().unwrap())?
+        } else if args.alias {
+            list::cd_path_alias(&ctx, target.as_deref().unwrap())?
         } else {
             let resolution = list::cd_path_resolve(&ctx, &git, target.as_deref())?;
             if let Some((alias, _)) = &resolution.alias_shadowed_branch {
                 eprintln!(
-                    "warning: '{alias}' is both a workspace alias and a branch; using the alias (use 'wkm wp -b {alias}' to force branch)"
+                    "warning: '{alias}' is both an alias and a branch; using the alias (use 'wkm wp -b {alias}' to force branch)"
                 );
             }
             resolution.path
@@ -69,7 +69,7 @@ fn pick_target(ctx: &RepoContext) -> anyhow::Result<String> {
             "@main".to_string(),
             format!("@main  [{}]", ctx.main_worktree.display()),
         ));
-        for (alias, entry) in &state.workspaces {
+        for (alias, entry) in &state.aliases {
             items.push((
                 alias.clone(),
                 format!("{alias}  (alias)  [{}]", entry.worktree_path.display()),

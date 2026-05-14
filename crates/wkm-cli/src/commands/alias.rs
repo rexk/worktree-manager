@@ -1,19 +1,19 @@
 use clap::{Args, Subcommand};
-use wkm_core::ops::workspace;
+use wkm_core::ops::alias;
 use wkm_core::repo::RepoContext;
 
 use crate::backend::with_backend;
 use crate::ui::{Styles, tilde_path};
 
 #[derive(Args)]
-pub struct WorkspaceArgs {
+pub struct AliasArgs {
     #[command(subcommand)]
-    pub command: WorkspaceCommands,
+    pub command: AliasCommands,
 }
 
 #[derive(Subcommand)]
-pub enum WorkspaceCommands {
-    /// List registered workspace aliases.
+pub enum AliasCommands {
+    /// List registered aliases.
     List {
         #[arg(long)]
         json: bool,
@@ -33,18 +33,18 @@ pub enum WorkspaceCommands {
     Clear { alias: String },
 }
 
-pub fn run(args: &WorkspaceArgs) -> anyhow::Result<()> {
+pub fn run(args: &AliasArgs) -> anyhow::Result<()> {
     let cwd = std::env::current_dir()?;
     let ctx = RepoContext::from_path(&cwd)?;
 
     with_backend!(ctx, &cwd, git => {
         match &args.command {
-            WorkspaceCommands::List { json } => {
-                let rows = workspace::list(&ctx, &git)?;
+            AliasCommands::List { json } => {
+                let rows = alias::list(&ctx, &git)?;
                 if *json {
                     println!("{}", serde_json::to_string_pretty(&rows)?);
                 } else if rows.is_empty() {
-                    println!("No workspace aliases. Use `wkm worktree create --name <alias>` or `wkm workspace set`.");
+                    println!("No aliases registered. Use `wkm worktree create --name <alias>` or `wkm alias set`.");
                 } else {
                     let s = Styles::new();
                     for row in &rows {
@@ -62,32 +62,34 @@ pub fn run(args: &WorkspaceArgs) -> anyhow::Result<()> {
                     }
                 }
             }
-            WorkspaceCommands::Set { alias, branch } => {
+            AliasCommands::Set { alias: name, branch } => {
                 match branch {
                     Some(b) => {
-                        workspace::set(
+                        alias::set(
                             &ctx,
-                            alias,
-                            workspace::WorkspaceTarget::Branch(b),
+                            &git,
+                            name,
+                            alias::AliasTarget::Branch(b),
                         )?;
                     }
                     None => {
-                        workspace::set(
+                        alias::set(
                             &ctx,
-                            alias,
-                            workspace::WorkspaceTarget::Path(&cwd),
+                            &git,
+                            name,
+                            alias::AliasTarget::Path(&cwd),
                         )?;
                     }
                 }
-                println!("Alias '{alias}' set.");
+                println!("Alias '{name}' set.");
             }
-            WorkspaceCommands::Rename { old, new } => {
-                workspace::rename(&ctx, old, new)?;
+            AliasCommands::Rename { old, new } => {
+                alias::rename(&ctx, old, new)?;
                 println!("Renamed '{old}' → '{new}'.");
             }
-            WorkspaceCommands::Clear { alias } => {
-                workspace::clear(&ctx, alias)?;
-                println!("Cleared alias '{alias}'.");
+            AliasCommands::Clear { alias: name } => {
+                alias::clear(&ctx, name)?;
+                println!("Cleared alias '{name}'.");
             }
         }
         Ok(())

@@ -1,4 +1,5 @@
 pub mod adopt;
+pub mod alias;
 pub mod checkout;
 pub mod drop_branch;
 pub mod fetch;
@@ -11,5 +12,4 @@ pub mod stash;
 pub mod status;
 pub mod sync;
 pub mod visibility;
-pub mod workspace;
 pub mod worktree;

@@ -128,19 +128,20 @@ pub fn merge(
         }
     }
 
-    // If this branch's worktree has a workspace alias, park it on a fresh
+    // If this branch's worktree has an alias, park it on a fresh
     // `_wkm/parked/<alias>` branch at the current parent tip so the directory
     // survives the merge for the next iteration.
-    let aliased_workspace = child_worktree
+    let aliased = child_worktree
         .as_ref()
-        .and_then(|wt| crate::ops::workspace::alias_for_path(&wkm_state, wt));
+        .and_then(|wt| crate::ops::alias::alias_for_path(&wkm_state, wt));
 
-    if let (Some(wt_path), Some(alias)) = (&child_worktree, &aliased_workspace) {
+    if let (Some(wt_path), Some(alias)) = (&child_worktree, &aliased) {
         let parked = format!("_wkm/parked/{alias}");
         let parent_ref_tip = git.branch_ref(&current_branch)?;
         // Create or move _wkm/parked/<alias> to the current parent tip.
         git.force_branch(&parked, &parent_ref_tip)?;
-        // Switch the workspace to the parked branch so the merged branch is freed.
+        // Switch the aliased worktree to the parked branch so the merged
+        // branch is freed.
         git.checkout(wt_path, &parked)?;
     } else if let Some(ref wt_path) = child_worktree {
         // No alias — preserve existing behaviour: tear the worktree down.
@@ -156,7 +157,7 @@ pub fn merge(
     // Delete child branch
     let _ = git.delete_branch(child_branch, true);
 
-    // Remove child from state (aliases stay in state.workspaces).
+    // Remove child from state (aliases stay in state.aliases).
     wkm_state.branches.remove(child_branch);
 
     // Clear WAL
@@ -565,8 +566,8 @@ mod tests {
 
         // Alias entry still points at the worktree.
         let state = state::read_state(&ctx.state_path).unwrap().unwrap();
-        assert!(state.workspaces.contains_key("specs"));
-        assert_eq!(state.workspaces["specs"].worktree_path, wt_path);
+        assert!(state.aliases.contains_key("specs"));
+        assert_eq!(state.aliases["specs"].worktree_path, wt_path);
         // BranchEntry for the merged branch is removed.
         assert!(!state.branches.contains_key("feat"));
     }
