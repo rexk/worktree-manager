@@ -94,23 +94,7 @@ pub fn set(
                 .clone()
                 .ok_or_else(|| WkmError::NoWorktree(branch.to_string()))?
         }
-        AliasTarget::Path(p) => {
-            let canon = p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
-            if canon == ctx.main_worktree {
-                return Err(WkmError::Other(
-                    "cannot alias the main worktree (use '@main' to navigate there)".to_string(),
-                ));
-            }
-            let matches_state = wkm_state
-                .branches
-                .values()
-                .any(|b| b.worktree_path.as_deref() == Some(canon.as_path()));
-            if matches_state {
-                canon
-            } else {
-                return Err(diagnose_unknown_path(git, &wkm_state, &canon));
-            }
-        }
+        AliasTarget::Path(p) => resolve_path_target(ctx, git, &wkm_state, p)?,
     };
 
     if !path.exists() {
@@ -152,59 +136,84 @@ pub fn set(
     Ok(())
 }
 
-/// Build an actionable error for a path that no tracked branch claims.
+/// Resolve `AliasTarget::Path` to the path that should be stored.
 ///
-/// Three flavors:
-/// - cwd *is* a wkm-tracked branch's git worktree but state has the wrong path → stale state, run `wkm repair`.
-/// - cwd is some other branch's git worktree, not tracked → adopt it.
+/// On success, returns a path that matches a tracked branch's recorded
+/// `worktree_path`. On failure, the error is one of four actionable
+/// diagnostics:
+///
+/// - cwd is (inside) the main worktree → use `@main`.
+/// - cwd is a tracked branch's worktree but state has the wrong path → stale state, run `wkm repair`.
+/// - cwd is some other branch's git worktree → not tracked, run `wkm adopt`.
 /// - cwd isn't a git worktree at all → create or pass `--branch`.
-fn diagnose_unknown_path(
+///
+/// Path equality is checked against canonicalized forms on both sides
+/// because on Windows `Path::canonicalize` produces `\\?\` UNC paths while
+/// `git worktree list` reports forward-slash drive paths.
+fn resolve_path_target(
+    ctx: &RepoContext,
     git: &(impl crate::git::GitDiscovery + crate::git::GitWorktrees),
     wkm_state: &crate::state::types::WkmState,
-    canon: &Path,
-) -> WkmError {
-    let worktrees = match git.worktree_list() {
-        Ok(wts) => wts,
-        Err(_) => {
-            return WkmError::Other(format!(
-                "no tracked branch has a worktree at {}. Create one with `wkm worktree create` or pass --branch <name>.",
-                canon.display()
-            ));
-        }
-    };
+    p: &Path,
+) -> Result<PathBuf, WkmError> {
+    let canon = p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    let main_canon = ctx
+        .main_worktree
+        .canonicalize()
+        .unwrap_or_else(|_| ctx.main_worktree.clone());
+    if canon == main_canon || canon.starts_with(&main_canon) {
+        return Err(WkmError::Other(
+            "cannot alias the main worktree (use '@main' to navigate there)".to_string(),
+        ));
+    }
 
-    let Some(wt) = worktrees.iter().find(|wt| wt.path == *canon) else {
-        return WkmError::Other(format!(
+    let worktrees = git.worktree_list().unwrap_or_default();
+    let wt_at_canon = worktrees.iter().find(|wt| {
+        wt.path
+            .canonicalize()
+            .map(|c| c == canon)
+            .unwrap_or_else(|_| wt.path == canon)
+    });
+
+    let Some(wt) = wt_at_canon else {
+        return Err(WkmError::Other(format!(
             "no tracked branch has a worktree at {}. Create one with `wkm worktree create` or pass --branch <name>.",
             canon.display()
-        ));
+        )));
     };
 
     let Some(branch) = wt.branch.as_deref() else {
-        return WkmError::Other(format!(
+        return Err(WkmError::Other(format!(
             "worktree at {} is in detached HEAD state; aliases require a branch.",
             canon.display()
-        ));
+        )));
     };
 
-    match wkm_state.branches.get(branch) {
-        Some(entry) => {
-            let recorded = match &entry.worktree_path {
-                Some(p) => p.display().to_string(),
-                None => "<none>".to_string(),
-            };
-            WkmError::Other(format!(
-                "wkm state is stale for branch '{branch}': recorded worktree_path = {recorded}, but it actually lives at {}. Run `wkm repair` and retry.",
-                canon.display()
-            ))
-        }
-        None => WkmError::Other(format!(
+    let Some(entry) = wkm_state.branches.get(branch) else {
+        return Err(WkmError::Other(format!(
             "branch '{branch}' at {} is not tracked by wkm. Run `wkm adopt {branch}` first.",
             canon.display()
-        )),
+        )));
+    };
+
+    let state_matches = entry
+        .worktree_path
+        .as_deref()
+        .and_then(|p| p.canonicalize().ok())
+        .is_some_and(|c| c == canon);
+    if state_matches {
+        Ok(canon)
+    } else {
+        let recorded = match &entry.worktree_path {
+            Some(p) => p.display().to_string(),
+            None => "<none>".to_string(),
+        };
+        Err(WkmError::Other(format!(
+            "wkm state is stale for branch '{branch}': recorded worktree_path = {recorded}, but it actually lives at {}. Run `wkm repair` and retry.",
+            canon.display()
+        )))
     }
 }
-
 /// Rename an alias. Errors if `old` is unknown or `new` is already taken.
 pub fn rename(ctx: &RepoContext, old: &str, new: &str) -> Result<(), WkmError> {
     encoding::validate_alias(new).map_err(WkmError::InvalidAlias)?;
