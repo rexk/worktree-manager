@@ -17,7 +17,7 @@ pub struct RepairResult {
     pub branches_adopted: Vec<String>,
     pub orphan_branches_deleted: Vec<String>,
     pub pending_removals_cleaned: Vec<String>,
-    pub workspace_aliases_cleared: Vec<String>,
+    pub aliases_cleared: Vec<String>,
 }
 
 /// Run repair: enforce all invariants.
@@ -187,25 +187,24 @@ pub fn repair(
         }
     }
 
-    // 8a. Drop workspace alias entries whose path no longer exists or whose
-    // alias fails validation (e.g. hand-edited invalid name).
+    // 8a. Drop alias entries whose path no longer exists or whose name fails
+    // validation (e.g. hand-edited invalid value).
     let stale_aliases: Vec<String> = wkm_state
-        .workspaces
+        .aliases
         .iter()
         .filter(|(alias, entry)| {
-            crate::encoding::validate_workspace_alias(alias).is_err()
-                || !entry.worktree_path.exists()
+            crate::encoding::validate_alias(alias).is_err() || !entry.worktree_path.exists()
         })
         .map(|(alias, _)| alias.clone())
         .collect();
     for alias in &stale_aliases {
-        wkm_state.workspaces.remove(alias);
-        result.workspace_aliases_cleared.push(alias.clone());
+        wkm_state.aliases.remove(alias);
+        result.aliases_cleared.push(alias.clone());
     }
 
     // Live set of `_wkm/parked/<alias>` branches that should be preserved.
     let live_parked: std::collections::BTreeSet<String> = wkm_state
-        .workspaces
+        .aliases
         .keys()
         .map(|a| format!("_wkm/parked/{a}"))
         .collect();

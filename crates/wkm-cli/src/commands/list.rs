@@ -42,7 +42,7 @@ pub fn run(args: &ListArgs) -> anyhow::Result<()> {
                 .map(|p| format!(" {}", s.parent.apply_to(format!("(parent: {p})"))))
                 .unwrap_or_default();
             let alias = entry
-                .workspace_alias
+                .alias
                 .as_deref()
                 .map(|a| format!(" (alias: {a})"))
                 .unwrap_or_default();

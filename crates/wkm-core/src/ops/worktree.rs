@@ -6,7 +6,7 @@ use crate::git::{GitBranches, GitDiscovery, GitWorktrees};
 use crate::repo::RepoContext;
 use crate::state;
 use crate::state::lock::WkmLock;
-use crate::state::types::{BranchEntry, WorkspaceEntry, WorktreeBackend};
+use crate::state::types::{AliasEntry, BranchEntry, WorktreeBackend};
 
 /// Options for creating a worktree.
 pub struct CreateOptions {
@@ -16,7 +16,7 @@ pub struct CreateOptions {
     pub base: Option<String>,
     /// Description for the branch.
     pub description: Option<String>,
-    /// Optional workspace alias to attach to the new worktree.
+    /// Optional alias to attach to the new worktree.
     pub name: Option<String>,
 }
 
@@ -35,7 +35,7 @@ pub fn create(
 ) -> Result<CreateResult, WkmError> {
     // Validate the alias up front so we fail before touching git/disk.
     if let Some(ref alias) = opts.name {
-        encoding::validate_workspace_alias(alias).map_err(WkmError::InvalidWorkspaceAlias)?;
+        encoding::validate_alias(alias).map_err(WkmError::InvalidAlias)?;
     }
 
     let lock = WkmLock::acquire(&ctx.lock_path)?;
@@ -49,9 +49,9 @@ pub fn create(
 
     // Reject duplicate aliases before creating anything.
     if let Some(ref alias) = opts.name
-        && let Some(existing) = wkm_state.workspaces.get(alias)
+        && let Some(existing) = wkm_state.aliases.get(alias)
     {
-        return Err(WkmError::WorkspaceAliasExists(
+        return Err(WkmError::AliasExists(
             alias.clone(),
             existing.worktree_path.clone(),
         ));
@@ -137,9 +137,9 @@ pub fn create(
         },
     );
     if let Some(ref alias) = opts.name {
-        wkm_state.workspaces.insert(
+        wkm_state.aliases.insert(
             alias.clone(),
-            WorkspaceEntry {
+            AliasEntry {
                 worktree_path: worktree_path.clone(),
                 created_at: now,
                 description: None,
@@ -227,10 +227,10 @@ pub fn remove(
 
     // Drop the wkm state entry entirely — the git branch itself is preserved.
     wkm_state.branches.remove(&branch_name);
-    // Drop any workspace alias pointing at this directory.
+    // Drop any alias pointing at this directory.
     let worktree_path_ref = worktree_path.clone();
     wkm_state
-        .workspaces
+        .aliases
         .retain(|_, v| v.worktree_path != worktree_path_ref);
     state::write_state(&ctx.state_path, &wkm_state)?;
 

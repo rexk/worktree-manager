@@ -39,7 +39,7 @@ pub fn run(args: &GraphArgs) -> anyhow::Result<()> {
             let annotate = move |name: &str| -> Option<String> {
                 let alias_for_path = |p: &std::path::Path| -> Option<String> {
                     wkm_state
-                        .workspaces
+                        .aliases
                         .iter()
                         .find(|(_, v)| v.worktree_path == p)
                         .map(|(k, _)| k.clone())

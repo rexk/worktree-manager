@@ -31,7 +31,7 @@ pub struct CreateArgs {
     /// Description
     #[arg(short, long)]
     pub description: Option<String>,
-    /// Workspace alias (persists across merges; usable with `wkm wp <name>`)
+    /// Alias to attach (persists across merges; usable with `wkm wp <name>`)
     #[arg(short = 'n', long)]
     pub name: Option<String>,
 }
@@ -40,9 +40,9 @@ pub struct CreateArgs {
 pub struct RemoveArgs {
     /// Branch name (defaults to current branch)
     pub branch: Option<String>,
-    /// Remove the worktree identified by the named workspace alias
-    #[arg(short = 'w', long = "workspace", conflicts_with = "branch")]
-    pub workspace: Option<String>,
+    /// Remove the worktree identified by the given alias
+    #[arg(short = 'a', long = "alias", conflicts_with = "branch")]
+    pub alias: Option<String>,
     /// Force removal even if dirty
     #[arg(short, long)]
     pub force: bool,
@@ -73,12 +73,12 @@ pub fn run(args: &WorktreeArgs) -> anyhow::Result<()> {
                 }
                 println!("Worktree: {}", result.worktree_path.display());
                 if let Some(ref alias) = create_args.name {
-                    println!("Workspace alias: {alias}");
+                    println!("Alias: {alias}");
                 }
             }
             WorktreeCommands::Remove(remove_args) => {
-                let resolved_branch = if let Some(alias) = &remove_args.workspace {
-                    Some(wkm_core::ops::list::branch_for_workspace(&ctx, &git, alias)?)
+                let resolved_branch = if let Some(alias) = &remove_args.alias {
+                    Some(wkm_core::ops::list::branch_for_alias(&ctx, &git, alias)?)
                 } else {
                     remove_args.branch.clone()
                 };
