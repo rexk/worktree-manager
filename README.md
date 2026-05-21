@@ -100,6 +100,15 @@ wkm completions fish > ~/.config/fish/completions/wkm.fish
 | `wkm status [<branch>]` | | Detailed state for a branch |
 | `wkm wp <branch>` | | Output (or cd to) a branch's worktree path |
 
+### Aliases
+
+| Command | Description |
+|---------|-------------|
+| `wkm alias list` | List registered worktree aliases |
+| `wkm alias set <alias> [-b <branch>]` | Attach an alias to a worktree (re-labels in place if it already has one) |
+| `wkm alias rename <old> <new>` | Rename an existing alias |
+| `wkm alias clear <alias>` | Remove an alias (the worktree is unaffected) |
+
 ### Maintenance
 
 | Command | Description |

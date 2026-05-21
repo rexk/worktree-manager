@@ -63,25 +63,18 @@ pub fn run(args: &AliasArgs) -> anyhow::Result<()> {
                 }
             }
             AliasCommands::Set { alias: name, branch } => {
-                match branch {
-                    Some(b) => {
-                        alias::set(
-                            &ctx,
-                            &git,
-                            name,
-                            alias::AliasTarget::Branch(b),
-                        )?;
+                let target = match branch {
+                    Some(b) => alias::AliasTarget::Branch(b),
+                    None => alias::AliasTarget::Path(&cwd),
+                };
+                match alias::set(&ctx, &git, name, target)? {
+                    alias::AliasSetOutcome::Created => {
+                        println!("Alias '{name}' set.");
                     }
-                    None => {
-                        alias::set(
-                            &ctx,
-                            &git,
-                            name,
-                            alias::AliasTarget::Path(&cwd),
-                        )?;
+                    alias::AliasSetOutcome::Renamed { from } => {
+                        println!("Renamed alias '{from}' → '{name}'.");
                     }
                 }
-                println!("Alias '{name}' set.");
             }
             AliasCommands::Rename { old, new } => {
                 alias::rename(&ctx, old, new)?;

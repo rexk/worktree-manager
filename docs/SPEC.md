@@ -316,6 +316,17 @@ Set via `wkm init --worktree-backend git|git-jj|jj`. Changing backend with exist
 | `wkm stash apply [<branch>]` | Apply the most recent `wkm` stash for the specified branch (default: current branch). Runs `git stash apply --index <hash>` using the hash from branch metadata. |
 | `wkm stash drop [<branch>]` | Drop the `wkm` stash reference from branch metadata. Does NOT drop the git stash commit (git GC will clean it up later if not referenced elsewhere). |
 
+### 7.5 Aliases
+
+Aliases are human-friendly names for secondary worktrees. They survive branch lifecycles and are resolvable wherever a branch name is accepted (e.g. `wkm wp <alias>`). A worktree carries **at most one alias** (one alias per worktree).
+
+| Command | Purpose |
+|---------|---------|
+| `wkm alias list [--json]` | List registered aliases with their worktree path, the branch currently checked out there, and a `[stale]` marker when the directory no longer exists. |
+| `wkm alias set <alias> [-b <branch>]` | Attach `<alias>` to a worktree — the current directory's worktree, or that of `-b <branch>`. If the target worktree already carries a different alias, it is **re-labelled in place** (`created_at` and description carry over) — no need to `clear`/`rename` first. Errors if `<alias>` is already in use by a *different* worktree, if the target is the main worktree (use `@main`), or if the path is not a tracked secondary worktree. |
+| `wkm alias rename <old> <new>` | Rename an alias. Errors if `<old>` is unknown or `<new>` is already taken. |
+| `wkm alias clear <alias>` | Remove an alias. The underlying worktree directory is unaffected. |
+
 ## 8. Key Mechanisms
 
 ### 8.1 Checkout in Place (Dirty-State Preservation)

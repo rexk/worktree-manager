@@ -129,6 +129,28 @@ fn alias_rename_and_clear() {
 }
 
 #[test]
+fn alias_set_relabels_existing_alias() {
+    let repo = TestRepo::new();
+    init(&repo);
+
+    run_ok(
+        &repo,
+        &["worktree", "create", "feat", "--name", "spec-studio"],
+    );
+
+    // Setting a new alias on an already-aliased worktree re-labels in place.
+    let (stdout, _) = run_ok(&repo, &["alias", "set", "sso", "--branch", "feat"]);
+    assert!(
+        stdout.contains("Renamed alias 'spec-studio' → 'sso'"),
+        "unexpected stdout: {stdout}"
+    );
+
+    let (stdout, _) = run_ok(&repo, &["alias", "list"]);
+    assert!(stdout.contains("sso"));
+    assert!(!stdout.contains("spec-studio"));
+}
+
+#[test]
 fn wp_warns_on_alias_branch_collision() {
     let repo = TestRepo::new();
     init(&repo);

@@ -30,6 +30,15 @@ pub enum AliasTarget<'a> {
     Path(&'a Path),
 }
 
+/// What `set` did, so callers can report it accurately.
+#[derive(Debug)]
+pub enum AliasSetOutcome {
+    /// A fresh alias was attached (or an existing alias re-confirmed).
+    Created,
+    /// The worktree already carried `from`; it was re-labelled in place.
+    Renamed { from: String },
+}
+
 /// List all registered aliases.
 pub fn list(
     ctx: &RepoContext,
@@ -59,11 +68,15 @@ pub fn list(
 
 /// Create or reuse an alias pointing at the given target.
 ///
+/// If the resolved worktree already carries a *different* alias, that alias is
+/// re-labelled in place (one alias per worktree) — `created_at` and any
+/// description carry over, and the returned outcome is `Renamed`.
+///
 /// Errors if:
 /// - the alias name fails validation,
 /// - the target is the main worktree,
 /// - the resolved path isn't a known secondary worktree,
-/// - another alias already points somewhere else.
+/// - `alias` is already in use by a *different* worktree.
 ///
 /// For `AliasTarget::Path`, when cwd is a real git worktree but the wkm state
 /// has the wrong path recorded for its branch, the error explicitly tells the
@@ -73,7 +86,7 @@ pub fn set(
     git: &(impl crate::git::GitDiscovery + crate::git::GitWorktrees),
     alias: &str,
     target: AliasTarget<'_>,
-) -> Result<(), WkmError> {
+) -> Result<AliasSetOutcome, WkmError> {
     encoding::validate_alias(alias).map_err(WkmError::InvalidAlias)?;
 
     let lock = WkmLock::acquire(&ctx.lock_path)?;
@@ -111,29 +124,42 @@ pub fn set(
         ));
     }
 
-    // Another alias already owns this path? Reject (one alias per worktree).
-    if let Some((other_alias, _)) = wkm_state
+    // Another alias already owns this path? Re-label it in place — one alias
+    // per worktree, and `set` is authoritative about which label that is.
+    let displaced = wkm_state
         .aliases
         .iter()
         .find(|(k, v)| k.as_str() != alias && v.worktree_path == path)
-    {
-        return Err(WkmError::Other(format!(
-            "path already aliased as '{other_alias}' — clear or rename that alias first"
-        )));
-    }
+        .map(|(k, _)| k.clone());
 
-    let now = chrono::Utc::now().to_rfc3339();
+    // Carry over `created_at`/`description` so a re-label (or idempotent
+    // re-set of the same alias) is a true rename, not a recreate.
+    let prior = displaced
+        .as_deref()
+        .or(Some(alias))
+        .and_then(|k| wkm_state.aliases.get(k));
+    let created_at = prior
+        .map(|e| e.created_at.clone())
+        .unwrap_or_else(|| chrono::Utc::now().to_rfc3339());
+    let description = prior.and_then(|e| e.description.clone());
+
+    if let Some(old) = &displaced {
+        wkm_state.aliases.remove(old);
+    }
     wkm_state.aliases.insert(
         alias.to_string(),
         AliasEntry {
             worktree_path: path,
-            created_at: now,
-            description: None,
+            created_at,
+            description,
         },
     );
     state::write_state(&ctx.state_path, &wkm_state)?;
     drop(lock);
-    Ok(())
+    Ok(match displaced {
+        Some(from) => AliasSetOutcome::Renamed { from },
+        None => AliasSetOutcome::Created,
+    })
 }
 
 /// Resolve `AliasTarget::Path` to the path that should be stored.
@@ -355,6 +381,39 @@ mod tests {
         set(&ctx, &git, "specs", AliasTarget::Branch("feat-a")).unwrap();
         let err = set(&ctx, &git, "specs", AliasTarget::Branch("feat-b"));
         assert!(matches!(err, Err(WkmError::AliasExists(_, _))));
+    }
+
+    #[test]
+    fn set_replaces_existing_alias_on_same_path() {
+        let (_repo, ctx, git) = setup();
+        worktree::create(
+            &ctx,
+            &git,
+            &CreateOptions {
+                branch: "feat".to_string(),
+                base: None,
+                description: None,
+                name: None,
+            },
+        )
+        .unwrap();
+
+        set(&ctx, &git, "spec-studio", AliasTarget::Branch("feat")).unwrap();
+        let created_at =
+            state::read_state(&ctx.state_path).unwrap().unwrap().aliases["spec-studio"]
+                .created_at
+                .clone();
+
+        let outcome = set(&ctx, &git, "sso", AliasTarget::Branch("feat")).unwrap();
+        match outcome {
+            AliasSetOutcome::Renamed { from } => assert_eq!(from, "spec-studio"),
+            _ => panic!("expected Renamed outcome"),
+        }
+
+        let state = state::read_state(&ctx.state_path).unwrap().unwrap();
+        assert!(!state.aliases.contains_key("spec-studio"));
+        assert!(state.aliases.contains_key("sso"));
+        assert_eq!(state.aliases["sso"].created_at, created_at);
     }
 
     #[test]
