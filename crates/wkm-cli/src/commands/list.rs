@@ -41,23 +41,27 @@ pub fn run(args: &ListArgs) -> anyhow::Result<()> {
                 .as_deref()
                 .map(|p| format!(" {}", s.parent.apply_to(format!("(parent: {p})"))))
                 .unwrap_or_default();
-            let alias = entry
-                .alias
-                .as_deref()
-                .map(|a| format!(" (alias: {a})"))
-                .unwrap_or_default();
-            let wt = if args.long {
-                entry
-                    .worktree_path
-                    .as_ref()
-                    .map(|p| format!(" ({})", tilde_path(p)))
-                    .unwrap_or_default()
+            // The main worktree is just a worktree whose handle is `@main`, so
+            // it shares the `(wt: <handle>)` slot with secondary worktrees.
+            let wt = if entry.in_main_worktree {
+                if args.long {
+                    format!(
+                        " ({}  alias: {})",
+                        tilde_path(&ctx.main_worktree),
+                        list::MAIN_WORKTREE_TOKEN
+                    )
+                } else {
+                    format!(" (wt: {})", list::MAIN_WORKTREE_TOKEN)
+                }
+            } else if let Some(p) = entry.worktree_path.as_ref() {
+                match (args.long, entry.alias.as_deref()) {
+                    (true, Some(a)) => format!(" ({}  alias: {a})", tilde_path(p)),
+                    (true, None) => format!(" ({})", tilde_path(p)),
+                    (false, Some(a)) => format!(" (wt: {a})"),
+                    (false, None) => " (wt)".to_string(),
+                }
             } else {
-                entry
-                    .worktree_path
-                    .as_ref()
-                    .map(|_| " (wt)".to_string())
-                    .unwrap_or_default()
+                String::new()
             };
             let stash = if entry.has_stash {
                 format!(" {}", s.stash.apply_to("[stash]"))
@@ -72,7 +76,7 @@ pub fn run(args: &ListArgs) -> anyhow::Result<()> {
                 ),
                 _ => String::new(),
             };
-            println!("  {name}{parent}{wt}{alias}{stash}{ahead_behind}");
+            println!("  {name}{parent}{wt}{stash}{ahead_behind}");
         }
         Ok(())
     })
