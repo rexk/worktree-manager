@@ -33,8 +33,11 @@ pub fn run(args: &GraphArgs) -> anyhow::Result<()> {
 
             let wkm_state = state::read_state(&ctx.state_path)?
                 .ok_or_else(|| anyhow::anyhow!("not initialized — run `wkm init` first"))?;
-            let base_branch = wkm_state.config.base_branch.clone();
             let main_wt = ctx.main_worktree.clone();
+            // Branch checked out in the main worktree, inferred at runtime.
+            let main_branch = wkm_core::git::GitDiscovery::current_branch(&git, &main_wt)
+                .ok()
+                .flatten();
 
             let annotate = move |name: &str| -> Option<String> {
                 let alias_for_path = |p: &std::path::Path| -> Option<String> {
@@ -44,9 +47,10 @@ pub fn run(args: &GraphArgs) -> anyhow::Result<()> {
                         .find(|(_, v)| v.worktree_path == p)
                         .map(|(k, _)| k.clone())
                 };
+                let is_main = main_branch.as_deref() == Some(name);
                 if args.long {
-                    if name == base_branch {
-                        // Main worktree always has the `@main` handle.
+                    if is_main {
+                        // The main worktree always has the `@main` handle.
                         Some(format!("{}  alias: @main", tilde_path(&main_wt)))
                     } else {
                         wkm_state
@@ -58,15 +62,15 @@ pub fn run(args: &GraphArgs) -> anyhow::Result<()> {
                                 None => tilde_path(p),
                             })
                     }
-                } else if name == base_branch {
-                    Some("wt @main".to_string())
+                } else if is_main {
+                    Some("wt: @main".to_string())
                 } else {
                     wkm_state
                         .branches
                         .get(name)
                         .and_then(|e| e.worktree_path.as_ref())
                         .map(|p| match alias_for_path(p) {
-                            Some(a) => format!("wt:{a}"),
+                            Some(a) => format!("wt: {a}"),
                             None => "wt".to_string(),
                         })
                 }

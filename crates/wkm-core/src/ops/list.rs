@@ -14,6 +14,9 @@ pub struct ListEntry {
     pub name: String,
     pub parent: Option<String>,
     pub worktree_path: Option<PathBuf>,
+    /// True when this branch is checked out in the main worktree. Mutually
+    /// exclusive with `worktree_path` (which only records secondary worktrees).
+    pub in_main_worktree: bool,
     pub has_stash: bool,
     pub description: Option<String>,
     pub ahead_of_parent: Option<usize>,
@@ -62,6 +65,10 @@ where
         })
         .collect::<Result<Vec<_>, WkmError>>()?;
 
+    // The branch checked out in the main worktree, inferred at runtime — the
+    // state file never records the main worktree path (see CLAUDE.md invariant).
+    let main_branch = git.current_branch(&ctx.main_worktree)?;
+
     let entries = wkm_state
         .branches
         .iter()
@@ -79,6 +86,7 @@ where
                 name: name.clone(),
                 parent: branch.parent.clone(),
                 worktree_path: branch.worktree_path.clone(),
+                in_main_worktree: main_branch.as_deref() == Some(name.as_str()),
                 has_stash: branch.stash_commit.is_some(),
                 description: branch.description.clone(),
                 ahead_of_parent: ahead,
@@ -305,6 +313,39 @@ mod tests {
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].name, "feature");
         assert_eq!(entries[0].parent, Some("main".to_string()));
+    }
+
+    #[test]
+    fn list_marks_branch_hosted_in_main_worktree() {
+        let (repo, ctx, git) = setup();
+
+        // `hosted` is checked out in the main worktree; `other` is not.
+        repo.create_branch("hosted");
+        repo.create_branch("other");
+        wkm_sandbox::git(repo.path(), &["checkout", "hosted"]);
+
+        let mut wkm_state = state::read_state(&ctx.state_path).unwrap().unwrap();
+        for name in ["hosted", "other"] {
+            wkm_state.branches.insert(
+                name.to_string(),
+                BranchEntry {
+                    parent: Some("main".to_string()),
+                    worktree_path: None,
+                    stash_commit: None,
+                    jj_workspace_name: None,
+                    description: None,
+                    created_at: "2026-01-01T00:00:00Z".to_string(),
+                    previous_branch: None,
+                },
+            );
+        }
+        state::write_state(&ctx.state_path, &wkm_state).unwrap();
+
+        let entries = list(&ctx, &git).unwrap();
+        let hosted = entries.iter().find(|e| e.name == "hosted").unwrap();
+        let other = entries.iter().find(|e| e.name == "other").unwrap();
+        assert!(hosted.in_main_worktree);
+        assert!(!other.in_main_worktree);
     }
 
     #[test]
