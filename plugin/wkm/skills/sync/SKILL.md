@@ -1,7 +1,7 @@
 ---
 name: wkm-sync
 description: Run wkm sync to rebase descendants onto updated parents, and handle the --continue / --abort flow when a conflict stops the rebase. Use when the user asks to "sync", "rebase the stack", "pull parent changes", or resolves a conflict from a prior sync.
-argument-hint: [--continue|--abort]
+argument-hint: "[--continue|--abort]"
 allowed-tools: Bash
 ---
 

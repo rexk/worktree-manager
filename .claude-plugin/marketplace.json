@@ -1,0 +1,12 @@
+{
+  "name": "worktree-manager",
+  "owner": { "name": "rexk" },
+  "description": "Claude Code plugin for the wkm worktree manager CLI.",
+  "plugins": [
+    {
+      "name": "wkm",
+      "source": "./plugin/wkm",
+      "description": "Slash commands, session context, and permission presets for the wkm worktree manager CLI."
+    }
+  ]
+}
