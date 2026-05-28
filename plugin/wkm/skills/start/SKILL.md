@@ -1,7 +1,7 @@
 ---
 name: wkm-start
 description: Start a new wkm-tracked branch as a child of the current branch, optionally in a secondary worktree. Use when the user asks to "start", "branch off", "stack a branch", or "create a worktree".
-argument-hint: <branch-name> [--worktree]
+argument-hint: "<branch-name> [--worktree]"
 allowed-tools: Bash
 ---
 

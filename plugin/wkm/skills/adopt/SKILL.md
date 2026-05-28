@@ -1,7 +1,7 @@
 ---
 name: wkm-adopt
 description: Bring existing plain-git branches under wkm tracking, inferring parents from merge-base. Use when the user asks to "adopt", "track existing branches", or "pull branches into wkm".
-argument-hint: [branch...] [--parent <name>] [--all]
+argument-hint: "[branch...] [--parent <name>] [--all]"
 allowed-tools: Bash
 ---
 
