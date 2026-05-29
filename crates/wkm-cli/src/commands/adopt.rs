@@ -13,9 +13,12 @@ pub struct AdoptArgs {
     /// Parent branch
     #[arg(short, long)]
     pub parent: Option<String>,
-    /// Adopt all untracked branches
+    /// Adopt all untracked branches checked out in a secondary worktree
     #[arg(long, conflicts_with = "branches")]
     pub all: bool,
+    /// Adopt every untracked local branch, including those without a worktree
+    #[arg(long, conflicts_with_all = ["branches", "all"])]
+    pub all_branches: bool,
 }
 
 pub fn run(args: &AdoptArgs) -> anyhow::Result<()> {
@@ -23,10 +26,23 @@ pub fn run(args: &AdoptArgs) -> anyhow::Result<()> {
     let ctx = RepoContext::from_path(&cwd)?;
 
     with_backend!(ctx, &cwd, git => {
-        if args.all {
+        if args.all_branches {
             let branches = adopt::discover_untracked(&ctx, &git)?;
             if branches.is_empty() {
                 println!("No untracked branches to adopt.");
+                return Ok(());
+            }
+            let result = adopt::adopt(&ctx, &git, &branches, args.parent.as_deref(), true)?;
+            for b in &result.adopted {
+                println!("Adopted '{b}'");
+            }
+            for b in &result.skipped {
+                println!("Skipped '{b}' (already tracked)");
+            }
+        } else if args.all {
+            let branches = adopt::discover_untracked_in_worktrees(&ctx, &git)?;
+            if branches.is_empty() {
+                println!("No untracked worktree-backed branches to adopt.");
                 return Ok(());
             }
             let result = adopt::adopt(&ctx, &git, &branches, args.parent.as_deref(), true)?;
@@ -61,12 +77,16 @@ fn pick_untracked(
     git: &(impl GitDiscovery + GitBranches + GitWorktrees),
 ) -> anyhow::Result<Vec<String>> {
     if !ui::is_interactive() {
-        anyhow::bail!("Specify one or more branches, or use --all");
+        anyhow::bail!(
+            "Specify one or more branches, or use --all (worktree-backed) / --all-branches"
+        );
     }
 
-    let untracked = adopt::discover_untracked(ctx, git)?;
+    let untracked = adopt::discover_untracked_in_worktrees(ctx, git)?;
     if untracked.is_empty() {
-        anyhow::bail!("No untracked branches to adopt");
+        anyhow::bail!(
+            "No untracked worktree-backed branches to adopt (use --all-branches to include local branches without a worktree)"
+        );
     }
 
     let selections = dialoguer::MultiSelect::new()

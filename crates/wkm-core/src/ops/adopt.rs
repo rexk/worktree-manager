@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use crate::error::WkmError;
 use crate::git::{GitBranches, GitDiscovery, GitWorktrees};
 use crate::repo::RepoContext;
@@ -114,6 +116,30 @@ pub fn discover_untracked(
         .filter(|b| {
             b != base && !b.starts_with("_wkm/") && !wkm_state.branches.contains_key(b.as_str())
         })
+        .collect())
+}
+
+/// Discover untracked branches that are checked out in a secondary worktree.
+///
+/// Filters `discover_untracked` further to only branches that appear in
+/// `git worktree list` outside the main worktree. This matches the user's
+/// likely intent for `wkm adopt`: adopt the branches you are actively
+/// working on, not every dangling local branch.
+pub fn discover_untracked_in_worktrees(
+    ctx: &RepoContext,
+    git: &(impl GitBranches + GitDiscovery + GitWorktrees),
+) -> Result<Vec<String>, WkmError> {
+    let untracked = discover_untracked(ctx, git)?;
+    let worktrees = git.worktree_list()?;
+    let worktree_branches: HashSet<String> = worktrees
+        .iter()
+        .filter(|wt| wt.path != ctx.main_worktree)
+        .filter_map(|wt| wt.branch.clone())
+        .collect();
+
+    Ok(untracked
+        .into_iter()
+        .filter(|b| worktree_branches.contains(b))
         .collect())
 }
 
@@ -315,5 +341,45 @@ mod tests {
 
         let untracked = discover_untracked(&ctx, &git).unwrap();
         assert_eq!(untracked, vec!["feature-b"]);
+    }
+
+    #[test]
+    fn discover_untracked_in_worktrees_filters_to_worktree_branches() {
+        let (repo, ctx, git) = setup();
+        repo.create_branch("with-worktree");
+        repo.create_branch("no-worktree");
+
+        let wt_dir = tempfile::tempdir().unwrap();
+        let wt_path = wt_dir.path().join("wt");
+        wkm_sandbox::git(
+            repo.path(),
+            &[
+                "worktree",
+                "add",
+                wt_path.to_str().unwrap(),
+                "with-worktree",
+            ],
+        );
+
+        let untracked = discover_untracked_in_worktrees(&ctx, &git).unwrap();
+        assert_eq!(untracked, vec!["with-worktree"]);
+
+        wkm_sandbox::git(
+            repo.path(),
+            &["worktree", "remove", wt_path.to_str().unwrap()],
+        );
+    }
+
+    #[test]
+    fn discover_untracked_in_worktrees_excludes_main_worktree_branch() {
+        let (repo, ctx, git) = setup();
+        repo.create_branch("hosted-in-main");
+        wkm_sandbox::git(repo.path(), &["checkout", "hosted-in-main"]);
+
+        let untracked = discover_untracked_in_worktrees(&ctx, &git).unwrap();
+        assert!(
+            untracked.is_empty(),
+            "branch checked out in main worktree should not be offered for adoption"
+        );
     }
 }
