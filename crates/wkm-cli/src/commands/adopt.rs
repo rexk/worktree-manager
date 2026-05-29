@@ -13,7 +13,7 @@ pub struct AdoptArgs {
     /// Parent branch
     #[arg(short, long)]
     pub parent: Option<String>,
-    /// Adopt all untracked branches
+    /// Adopt all untracked branches checked out in a secondary worktree
     #[arg(long, conflicts_with = "branches")]
     pub all: bool,
 }
@@ -24,9 +24,9 @@ pub fn run(args: &AdoptArgs) -> anyhow::Result<()> {
 
     with_backend!(ctx, &cwd, git => {
         if args.all {
-            let branches = adopt::discover_untracked(&ctx, &git)?;
+            let branches = adopt::discover_untracked_in_worktrees(&ctx, &git)?;
             if branches.is_empty() {
-                println!("No untracked branches to adopt.");
+                println!("No untracked worktree-backed branches to adopt.");
                 return Ok(());
             }
             let result = adopt::adopt(&ctx, &git, &branches, args.parent.as_deref(), true)?;
@@ -64,9 +64,9 @@ fn pick_untracked(
         anyhow::bail!("Specify one or more branches, or use --all");
     }
 
-    let untracked = adopt::discover_untracked(ctx, git)?;
+    let untracked = adopt::discover_untracked_in_worktrees(ctx, git)?;
     if untracked.is_empty() {
-        anyhow::bail!("No untracked branches to adopt");
+        anyhow::bail!("No untracked worktree-backed branches to adopt");
     }
 
     let selections = dialoguer::MultiSelect::new()
