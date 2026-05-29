@@ -103,7 +103,7 @@ pub fn adopt(
 ///
 /// Filters out: the base branch, `_wkm/*` internal branches, and
 /// already-tracked branches.
-pub fn discover_untracked(
+fn discover_untracked(
     ctx: &RepoContext,
     git: &(impl GitBranches + GitDiscovery),
 ) -> Result<Vec<String>, WkmError> {
